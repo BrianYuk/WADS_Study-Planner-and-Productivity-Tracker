@@ -23,7 +23,7 @@ L4CC
 | Name | Student ID | Role | GitHub Username |
 |------|-----------|------|----------------|
 | Brian Yuktipada | 2802523004 |  | BrianYuk |
-| William Ekapanna Rusmana | 2802523111 |  |  |
+| William Ekapanna Rusmana | 2802523111 |  | WILLIAM-RUSMANA |
 | Yifan Zhou | 2802572246 |  | yfz373 |
 
 ---
