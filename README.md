@@ -124,3 +124,11 @@ Chosen because it is:
 ### 6.2 API Documentation
 
 
+---
+
+## 7. Database Design 
+### 7.1 Database Choice
+
+
+### 7.2 Schema / Data Structure 
+
