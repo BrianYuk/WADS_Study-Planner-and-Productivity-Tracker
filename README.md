@@ -123,3 +123,27 @@ Chosen because it is:
 
 ### 5.1 Architecture Diagram
 
+---
+
+## 6. API Design
+### 6.1 API Endpoints
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| GET |  |  | Y/N |
+| POST |  |  | Y/N |
+| PUT |  |  | Y/N |
+| DELETE |  |  | Y/N |
+
+
+### 6.2 API Documentation
+
+
+---
+
+## 7. Database Design 
+### 7.1 Database Choice
+
+
+### 7.2 Schema / Data Structure 
+
