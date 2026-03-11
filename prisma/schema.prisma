@@ -1,0 +1,242 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String    @id @default(uuid())
+  email           String    @unique
+  name            String
+  passwordHash    String
+  role            Role      @default(STUDENT)
+  avatar          String?
+  timezone        String    @default("UTC")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tasks           Task[]
+  sessions        StudySession[]
+  goals           Goal[]
+  notifications   Notification[]
+  aiAnalyses      AIAnalysis[]
+  preferences     UserPreference?
+  calendars       Calendar[]
+  refreshTokens   RefreshToken[]
+
+  @@map("users")
+}
+
+model UserPreference {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dailyStudyGoalHours   Int      @default(4)
+  notificationsEnabled  Boolean  @default(true)
+  reminderMinutes       Int      @default(15)
+  theme                 String   @default("light")
+  weekStartDay          Int      @default(1) // 0=Sunday, 1=Monday
+  updatedAt             DateTime @updatedAt
+
+  @@map("user_preferences")
+}
+
+model Task {
+  id            String      @id @default(uuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title         String
+  description   String?
+  subject       String?
+  priority      Priority    @default(MEDIUM)
+  status        TaskStatus  @default(TODO)
+  dueDate       DateTime?
+  estimatedMins Int?
+  actualMins    Int?
+  tags          String[]
+  aiPriority    Float?      // AI-computed priority score 0-1
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  sessions      StudySession[]
+  subtasks      Subtask[]
+
+  @@map("tasks")
+}
+
+model Subtask {
+  id          String    @id @default(uuid())
+  taskId      String
+  task        Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  title       String
+  completed   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+
+  @@map("subtasks")
+}
+
+model StudySession {
+  id            String        @id @default(uuid())
+  userId        String
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taskId        String?
+  task          Task?         @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  subject       String?
+  startTime     DateTime
+  endTime       DateTime?
+  durationMins  Int?
+  focusScore    Int?          // 1-100 self-reported
+  notes         String?
+  type          SessionType   @default(POMODORO)
+  createdAt     DateTime      @default(now())
+
+  @@map("study_sessions")
+}
+
+model Goal {
+  id            String      @id @default(uuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title         String
+  description   String?
+  targetDate    DateTime
+  targetValue   Float
+  currentValue  Float       @default(0)
+  unit          String      @default("hours")
+  type          GoalType    @default(WEEKLY)
+  status        GoalStatus  @default(ACTIVE)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@map("goals")
+}
+
+model Calendar {
+  id        String          @id @default(uuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  color     String          @default("#6366f1")
+  isPublic  Boolean         @default(false)
+  createdAt DateTime        @default(now())
+
+  events    CalendarEvent[]
+
+  @@map("calendars")
+}
+
+model CalendarEvent {
+  id          String    @id @default(uuid())
+  calendarId  String
+  calendar    Calendar  @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  startTime   DateTime
+  endTime     DateTime
+  allDay      Boolean   @default(false)
+  recurrence  String?   // RRULE string
+  color       String?
+  createdAt   DateTime  @default(now())
+
+  @@map("calendar_events")
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      NotifType @default(REMINDER)
+  isRead    Boolean   @default(false)
+  sentAt    DateTime  @default(now())
+  readAt    DateTime?
+
+  @@map("notifications")
+}
+
+model AIAnalysis {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        AIType
+  input       Json
+  output      Json
+  model       String    @default("gpt-4o-mini")
+  tokensUsed  Int?
+  latencyMs   Int?
+  createdAt   DateTime  @default(now())
+
+  @@map("ai_analyses")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("refresh_tokens")
+}
+
+// Enums
+enum Role {
+  STUDENT
+  ADMIN
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum SessionType {
+  POMODORO
+  DEEP_WORK
+  REVIEW
+  PRACTICE
+  READING
+}
+
+enum GoalType {
+  DAILY
+  WEEKLY
+  MONTHLY
+  SEMESTER
+}
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum NotifType {
+  REMINDER
+  ACHIEVEMENT
+  AI_INSIGHT
+  SYSTEM
+}
+
+enum AIType {
+  TASK_PRIORITIZATION
+  SCHEDULE_OPTIMIZATION
+  BURNOUT_DETECTION
+  PRODUCTIVITY_ANALYSIS
+  STUDY_RECOMMENDATION
+}
