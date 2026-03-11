@@ -1,4 +1,4 @@
-# 📚 Kira Flow – Smart Productivity Tracker
+# Kira Flow – Smart Productivity Tracker
 
 > Final Project – Web Application Development and Security  
 > **Course Code:** COMP6703001  
@@ -12,7 +12,7 @@
 
 **Project Domain:** Study Planner & Productivity Tracker (Option 10)
 
-**Class:** [Your Class Code] – L4AC / L4BC / L4CC
+**Class:** L4CC
 
 **Group Members:**
 
