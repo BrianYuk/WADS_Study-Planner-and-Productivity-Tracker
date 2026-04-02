@@ -18,7 +18,7 @@
 
 | Name | Student ID | Role | GitHub Username |
 |------|-----------|------|-----------------|
-| [Member 1] | [ID] | Frontend + AI Integration | @username1 |
+| Brian Yuktipada | 2802523004 | Frontend + AI Integration | @BrianYuk |
 | [Member 2] | [ID] | Backend + Database | @username2 |
 | [Member 3] | [ID] | DevOps + Security + Testing | @username3 |
 
