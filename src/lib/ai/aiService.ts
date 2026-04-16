@@ -66,7 +66,7 @@ Sort by aiScore descending. aiScore is 0-1 where 1 = most urgent.`
         userId,
         type: 'TASK_PRIORITIZATION',
         input: { taskCount: tasks.length },
-        output: { results } as unknown as Record<string, unknown>,
+        output: JSON.parse(JSON.stringify({ results })),
         model: 'gpt-4o-mini',
         tokensUsed: response.usage?.total_tokens,
         latencyMs: Date.now() - start,
