@@ -11,7 +11,7 @@ const updateGoalSchema = z.object({
   targetValue: z.number().positive().optional(),
   currentValue: z.number().min(0).optional(),
   unit: z.string().max(50).optional(),
-  status: z.enum(['ACTIVE', 'COMPLETED', 'CANCELLED', 'PAUSED']).optional(),
+  status: z.enum(['ACTIVE', 'COMPLETED', 'CANCELLED']).optional(),
 })
 
 // GET /api/goals/[id] - Get a single goal
