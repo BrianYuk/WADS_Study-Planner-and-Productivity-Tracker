@@ -52,7 +52,7 @@ Sort by aiScore descending. aiScore is 0-1 where 1 = most urgent.`
 
   const start = Date.now()
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 1000,
@@ -121,7 +121,7 @@ Return ONLY valid JSON:
 }`
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 1200,
