@@ -1,0 +1,37 @@
+# Dependencies — reinstalled during Docker build
+node_modules
+npm-debug.log*
+
+# Next.js build output — rebuilt during Docker build
+.next
+out
+
+# Environment files — injected at runtime, never baked into image
+.env
+.env.*
+!.env.example
+
+# Git
+.git
+.gitignore
+
+# Development tools
+.eslintrc*
+.prettierrc*
+*.test.ts
+*.test.tsx
+tests/
+__tests__/
+
+# Documentation
+README.md
+docs/
+
+# Docker files themselves
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# OS files
+.DS_Store
+Thumbs.db

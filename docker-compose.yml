@@ -1,59 +1,101 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Kira Flow — Docker Compose
+# ════════════════════════════════════════════════════════════════════════════
+# Services:
+#   app      — Next.js application (port 3000)
+#   db       — PostgreSQL 16 database (port 5432)
+#   pgadmin  — Database GUI, dev profile only (port 5050)
+#
+# Usage:
+#   Development:  docker compose --profile dev up
+#   Production:   docker compose up -d
+#   Stop:         docker compose down
+#   Rebuild:      docker compose up -d --build
+# ════════════════════════════════════════════════════════════════════════════
+
 version: '3.9'
 
 services:
+
+  # ── Next.js Application ───────────────────────────────────────────────────
   app:
     build:
       context: .
       dockerfile: Dockerfile
       target: runner
+    container_name: kiraflow-app
     ports:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      - JWT_SECRET=${JWT_SECRET}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - APP_SECRET=${APP_SECRET}
+      # Uses local PostgreSQL container — overrides Neon URL for local Docker
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-kiraflow2026}@db:5432/${POSTGRES_DB:-kiraflow_db}?sslmode=disable
+      - JWT_SECRET=${JWT_SECRET:-kiraflow-jwt-secret-change-in-production}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-kiraflow-nextauth-secret-change-in-production}
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-placeholder}
+      - APP_SECRET=${APP_SECRET:-kiraflow-app-secret}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     networks:
-      - studyplanner_net
+      - kiraflow_net
 
+  # ── PostgreSQL Database ───────────────────────────────────────────────────
   db:
     image: postgres:16-alpine
+    container_name: kiraflow-db
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-supersecret}
-      POSTGRES_DB: ${POSTGRES_DB:-studyplanner_db}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kiraflow2026}
+      POSTGRES_DB: ${POSTGRES_DB:-kiraflow_db}
     volumes:
+      # Named volume — persists data across container restarts
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      # Expose locally for Prisma Studio / direct DB access
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
     networks:
-      - studyplanner_net
+      - kiraflow_net
 
-  # Optional: pgAdmin for DB management in development
+  # ── pgAdmin (dev profile only) ────────────────────────────────────────────
+  # Only starts when running: docker compose --profile dev up
   pgadmin:
     image: dpage/pgadmin4:latest
+    container_name: kiraflow-pgadmin
     profiles: ["dev"]
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@studyplanner.dev
+      PGADMIN_DEFAULT_EMAIL: admin@kiraflow.app
       PGADMIN_DEFAULT_PASSWORD: admin
     ports:
       - "5050:80"
     depends_on:
       - db
     networks:
-      - studyplanner_net
+      - kiraflow_net
 
+# ── Volumes ───────────────────────────────────────────────────────────────────
 volumes:
   postgres_data:
+    name: kiraflow_postgres_data
 
+# ── Networks ──────────────────────────────────────────────────────────────────
 networks:
-  studyplanner_net:
+  kiraflow_net:
     driver: bridge
+    name: kiraflow_network
