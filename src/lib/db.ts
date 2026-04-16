@@ -9,15 +9,6 @@ export const prisma =
   globalForPrisma.prisma ||
   new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
-    datasources: {
-      db: {
-        // Neon serverless: use the pooler URL with ?pgbouncer=true for connection pooling.
-        // The pooler URL uses port 6543 (PgBouncer) instead of 5432 (direct connection).
-        // Set DATABASE_URL in .env to the Neon pooler connection string:
-        // postgresql://user:pass@ep-xxx-pooler.region.aws.neon.tech/neondb?sslmode=require&pgbouncer=true
-        url: process.env.DATABASE_URL,
-      },
-    },
   })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
