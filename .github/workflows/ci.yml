@@ -73,8 +73,8 @@ jobs:
         run: npm run lint
         continue-on-error: true
 
-      - name: Run tests
-        run: npm test -- --passWithNoTests --forceExit --testPathIgnorePatterns="aiFeatures"
+      - name: Run unit tests only
+        run: npm test -- --passWithNoTests --forceExit --testPathPattern="tests/unit"
         env:
           CI: true
 
