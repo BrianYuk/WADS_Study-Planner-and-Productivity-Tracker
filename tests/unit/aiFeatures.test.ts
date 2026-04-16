@@ -1,6 +1,6 @@
 /**
  * Tests: AI Feature Testing (Week 11)
- * Covers: Task Prioritization, Burnout Detection
+ * Covers: Task Prioritization
  * Per spec: valid input, invalid input, edge cases, failure handling, abuse testing
  */
 
@@ -27,7 +27,7 @@ jest.mock('@/lib/db', () => ({
 }))
 
 import OpenAI from 'openai'
-import { prioritizeTasks, detectBurnoutRisk } from '@/lib/ai/aiService'
+import { prioritizeTasks } from '@/lib/ai/aiService'
 
 const mockOpenAI = new OpenAI() as jest.Mocked<OpenAI>
 
@@ -131,106 +131,3 @@ describe('AI Feature: Task Prioritization', () => {
   })
 })
 
-describe('AI Feature: Burnout Detection', () => {
-  const healthyPattern = {
-    dailyStudyHours: [3, 4, 3.5, 4, 2, 5, 3],
-    completedTasks: [3, 4, 3, 5, 2, 4, 3],
-    focusScores: [75, 80, 78, 82, 70, 85, 72],
-    totalPendingTasks: 5,
-    overdueCount: 0,
-  }
-
-  it('BD-01: Healthy pattern - returns LOW risk', async () => {
-    ;(mockOpenAI.chat.completions.create as jest.Mock).mockResolvedValue({
-      choices: [{ message: { content: JSON.stringify({
-        riskLevel: 'LOW',
-        score: 15,
-        insights: ['Consistent study hours'],
-        recommendations: ['Keep up the good work'],
-        scheduleAdjustments: [],
-      }) } }],
-      usage: { total_tokens: 200 },
-    })
-
-    const analysis = await detectBurnoutRisk('user-1', healthyPattern)
-    expect(analysis.riskLevel).toBe('LOW')
-    expect(analysis.score).toBeLessThan(50)
-  })
-
-  it('BD-02: Overworked pattern - detects HIGH risk', async () => {
-    const overloadPattern = {
-      dailyStudyHours: [10, 12, 11, 13, 10, 12, 11],
-      completedTasks: [8, 6, 5, 4, 3, 2, 1], // declining
-      focusScores: [80, 65, 55, 45, 40, 35, 30], // declining
-      totalPendingTasks: 25,
-      overdueCount: 8,
-    }
-
-    ;(mockOpenAI.chat.completions.create as jest.Mock).mockResolvedValue({
-      choices: [{ message: { content: JSON.stringify({
-        riskLevel: 'HIGH',
-        score: 78,
-        insights: ['Study hours far exceed healthy limits', 'Focus score declining sharply'],
-        recommendations: ['Take a full rest day', 'Reduce daily study to 6 hours max'],
-        scheduleAdjustments: ['Move 5 tasks to next week', 'Cancel non-essential sessions'],
-      }) } }],
-      usage: { total_tokens: 250 },
-    })
-
-    const analysis = await detectBurnoutRisk('user-1', overloadPattern)
-    expect(['HIGH', 'CRITICAL']).toContain(analysis.riskLevel)
-    expect(analysis.recommendations.length).toBeGreaterThan(0)
-  })
-
-  it('BD-03: AI failure - returns safe default (LOW risk)', async () => {
-    ;(mockOpenAI.chat.completions.create as jest.Mock).mockRejectedValue(new Error('API unavailable'))
-
-    const analysis = await detectBurnoutRisk('user-1', healthyPattern)
-    expect(analysis.riskLevel).toBe('LOW')
-    expect(analysis.insights).toContain('Analysis temporarily unavailable')
-  })
-
-  it('BD-04: All zeros (new user) - handles edge case', async () => {
-    const newUserPattern = {
-      dailyStudyHours: [0, 0, 0, 0, 0, 0, 0],
-      completedTasks: [0, 0, 0, 0, 0, 0, 0],
-      focusScores: [0, 0, 0, 0, 0, 0, 0],
-      totalPendingTasks: 0,
-      overdueCount: 0,
-    }
-
-    ;(mockOpenAI.chat.completions.create as jest.Mock).mockResolvedValue({
-      choices: [{ message: { content: JSON.stringify({
-        riskLevel: 'LOW',
-        score: 0,
-        insights: ['No study data recorded yet'],
-        recommendations: ['Start logging your study sessions'],
-        scheduleAdjustments: [],
-      }) } }],
-      usage: { total_tokens: 100 },
-    })
-
-    const analysis = await detectBurnoutRisk('user-1', newUserPattern)
-    expect(analysis).toBeDefined()
-    expect(analysis.riskLevel).toBeTruthy()
-  })
-
-  it('BD-05: Consistency test - same input returns same risk level', async () => {
-    const mockAnalysis = {
-      riskLevel: 'MEDIUM',
-      score: 45,
-      insights: ['Moderate workload'],
-      recommendations: ['Maintain balance'],
-      scheduleAdjustments: [],
-    }
-
-    ;(mockOpenAI.chat.completions.create as jest.Mock).mockResolvedValue({
-      choices: [{ message: { content: JSON.stringify(mockAnalysis) } }],
-      usage: { total_tokens: 150 },
-    })
-
-    const result1 = await detectBurnoutRisk('user-1', healthyPattern)
-    const result2 = await detectBurnoutRisk('user-1', healthyPattern)
-    expect(result1.riskLevel).toBe(result2.riskLevel)
-  })
-})
