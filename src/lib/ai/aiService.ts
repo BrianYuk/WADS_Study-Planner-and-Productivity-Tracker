@@ -1,7 +1,9 @@
 import OpenAI from 'openai'
 import { prisma } from '@/lib/db'
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+function getOpenAI() {
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY || 'placeholder' })
+}
 
 // ── AI FEATURE 1: Smart Task Prioritization ──────────────────────────────────
 export interface TaskForPrioritization {
