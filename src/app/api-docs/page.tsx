@@ -67,7 +67,7 @@ export default function ApiDocsPage() {
 
         .swagger-ui .opblock { border-radius: 8px !important; margin: 6px 0 !important; border: none !important; }
         .swagger-ui .opblock .opblock-summary { border-radius: 8px !important; }
-        .swagger-ui .opblock .opblock-summary-description { color: #94a3b8 !important; font-style: italic !important; }
+        .swagger-ui .opblock .opblock-summary-description { color: #fff !important; font-style: italic !important; }
         .swagger-ui .opblock.opblock-get { background: rgba(97,175,254,.07) !important; border-left: 3px solid #61AFFE !important; }
         .swagger-ui .opblock.opblock-post { background: rgba(73,204,144,.07) !important; border-left: 3px solid #49CC90 !important; }
         .swagger-ui .opblock.opblock-put { background: rgba(252,161,48,.07) !important; border-left: 3px solid #FCA130 !important; }
@@ -92,7 +92,7 @@ export default function ApiDocsPage() {
         .swagger-ui .response-col_description { color: #94a3b8 !important; }
 
         .swagger-ui .microlight, .swagger-ui .highlight-code { background: #0a0d14 !important; border-radius: 6px !important; }
-        .swagger-ui .microlight span, .swagger-ui pre.microlight { color: #90EE90 !important; }
+        .swagger-ui .microlight span, .swagger-ui pre.microlight { color: #f1f5f9 !important; }
 
         .swagger-ui .model-box { background: #161b27 !important; border-radius: 8px !important; }
         .swagger-ui .model { color: #94a3b8 !important; }
