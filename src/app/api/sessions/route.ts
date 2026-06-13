@@ -4,6 +4,8 @@ import { prisma } from '@/lib/db'
 import { withAuth } from '@/middleware/apiMiddleware'
 import type { JWTPayload } from '@/lib/auth'
 
+export const dynamic = 'force-dynamic'
+
 const sessionSchema = z.object({
   taskId: z.string().uuid().optional(),
   subject: z.string().max(100).optional(),

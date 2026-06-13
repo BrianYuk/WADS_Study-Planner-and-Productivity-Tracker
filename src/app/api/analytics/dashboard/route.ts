@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db'
 import { withAuth } from '@/middleware/apiMiddleware'
 import { subDays, startOfWeek, eachDayOfInterval, format } from 'date-fns'
 
+export const dynamic = 'force-dynamic'
+
 // GET /api/analytics/dashboard
 export async function GET(req: NextRequest) {
   return withAuth(req, async (req, user) => {

@@ -5,6 +5,8 @@ import { withAuth } from '@/middleware/apiMiddleware'
 import { sanitizeInput } from '@/middleware/apiMiddleware'
 import type { JWTPayload } from '@/lib/auth'
 
+export const dynamic = 'force-dynamic'
+
 const createTaskSchema = z.object({
   title: z.string().min(1).max(255),
   description: z.string().max(2000).optional(),

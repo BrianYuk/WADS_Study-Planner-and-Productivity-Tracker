@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth } from '@/middleware/apiMiddleware'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(req: NextRequest) {
   return withAuth(req, async (req, user) => {
     const notifications = await prisma.notification.findMany({
