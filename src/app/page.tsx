@@ -1,4 +1,6 @@
+import { p } from 'framer-motion/client';
 import Link from 'next/link'
+
 
 export default function LandingPage() {
   return (
@@ -13,7 +15,9 @@ export default function LandingPage() {
         .bg-grid{position:fixed;inset:0;background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
         nav{position:sticky;top:0;z-index:50;display:flex;align-items:center;justify-content:space-between;padding:0 60px;height:66px;background:rgba(9,11,18,.88);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.08);}
         .nav-logo{display:flex;align-items:center;gap:10px;text-decoration:none;}
-        .logo-icon{width:36px;height:36px;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;}
+        
+        .logo-icon{display:flex;align-items:center;justify-content:center;}
+        .logo-icon img{height:1.5rem;width:auto;object-fit:contain;display:block;}
         .logo-text{font-size:16px;font-weight:800;color:#f1f5f9;}
         .logo-text span{color:#f59e0b;}
         .nav-links{display:flex;gap:8px;}
@@ -24,7 +28,7 @@ export default function LandingPage() {
         .btn-cta{background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;padding:14px 32px;border-radius:13px;font-size:16px;font-weight:700;}
         .btn-cta:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(245,158,11,.4);}
         .btn-outline{background:transparent;border:1px solid rgba(245,158,11,.4);color:#f59e0b;padding:14px 28px;border-radius:13px;font-size:16px;font-weight:700;}
-        .hero{padding:110px 60px 80px;text-align:center;position:relative;z-index:1;}
+        .hero{padding:110px 60px 62px;text-align:center;position:relative;z-index:1;}
         .hero-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);border-radius:100px;padding:5px 14px;font-size:11px;font-weight:700;color:#f59e0b;letter-spacing:.05em;text-transform:uppercase;margin-bottom:24px;}
         .hero-h1{font-size:clamp(36px,6vw,72px);font-weight:900;line-height:1.05;letter-spacing:-0.04em;margin-bottom:20px;}
         .grd{background:linear-gradient(135deg,#f59e0b,#fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
@@ -34,7 +38,9 @@ export default function LandingPage() {
         .stat-n{font-size:26px;font-weight:900;font-family:'DM Mono',monospace;}
         .stat-n span{color:#f59e0b;}
         .stat-l{font-size:11px;color:#475569;margin-top:2px;}
-        .feats{padding:80px 60px;position:relative;z-index:1;}
+        .divider-logo{display:flex;justify-content:center;padding: 0 0 40px;position:relative;z-index:1;}
+        .divider-logo img{width: 8rem;object-fit:contain;opacity:.9;}
+        .feats{padding:0 60px 80px 60px;position:relative;z-index:1;}
         .feats-title{font-size:clamp(28px,4vw,42px);font-weight:800;letter-spacing:-0.03em;text-align:center;margin-bottom:50px;}
         .feats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;max-width:1050px;margin:0 auto;}
         .feat-c{background:rgba(15,18,28,.7);border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:26px;transition:all .25s;}
@@ -71,7 +77,16 @@ export default function LandingPage() {
       `}</style>
       <div className="blob blob1"/><div className="blob blob2"/><div className="bg-grid"/>
       <nav>
-        <Link href="/" className="nav-logo"><div className="logo-icon">⚡</div><div className="logo-text">Kira<span>Flow</span></div></Link>
+        <Link href="/" className="nav-logo">
+          <div className="logo-icon">
+            <div>
+              <img src="kiraFlowLogo.png"></img>
+            </div>
+          </div>
+            <div className="logo-text">
+              Kira<span>Flow</span>
+          </div>
+          </Link>
         <div className="nav-links">
           <Link href="/login" className="btn btn-ghost">Sign In</Link>
           <Link href="/register" className="btn btn-amber">Get Started →</Link>
@@ -91,6 +106,7 @@ export default function LandingPage() {
           <div><div className="stat-n">24<span>/7</span></div><div className="stat-l">Available</div></div>
         </div>
       </div>
+      <div className="divider-logo"><img src="kiraFlowLogo.png" alt="kira logo" /></div>
       <div className="feats">
         <div className="feats-title">Built for academic success</div>
         <div className="feats-grid">
@@ -124,6 +140,7 @@ export default function LandingPage() {
         <Link href="/register" className="btn btn-cta" style={{display:'inline-flex'}}>Create free account →</Link>
       </div>
       <footer><span>© 2026 Kira Flow · BINUS University International · COMP6703001</span><span>Built with Next.js · PostgreSQL · OpenAI</span></footer>
+      <p className="text-9xl">jesus</p>
     </>
   )
 }

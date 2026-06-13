@@ -5,6 +5,20 @@ import { useRouter } from 'next/navigation'
 
 type Page = 'dashboard'|'tasks'|'timer'|'calendar'|'goals'|'analytics'|'notifications'|'settings'
 
+type TaskPriority = 'LOW'|'MEDIUM'|'HIGH'|'URGENT'
+type TaskStatus = 'TODO'|'IN_PROGRESS'|'COMPLETED'|'CANCELLED'
+type ApiTask = {
+  id: string
+  title: string
+  subject: string | null
+  priority: TaskPriority
+  status: TaskStatus
+  dueDate: string | null
+  tags: string[]
+  aiPriority: number | null
+  subtasks: { id: string; title: string; completed: boolean }[]
+}
+
 export default function DashboardPage() {
   const router = useRouter()
   const [page, setPage] = useState<Page>('dashboard')
@@ -19,10 +33,22 @@ export default function DashboardPage() {
   const [settingsTab, setSettingsTab] = useState('profile')
   const timerRef = useRef<ReturnType<typeof setInterval>|null>(null)
 
+  const [tasks, setTasks] = useState<ApiTask[]>([])
+  const [tasksLoading, setTasksLoading] = useState(true)
+  const [tasksError, setTasksError] = useState('')
+  const [taskFormOpen, setTaskFormOpen] = useState(false)
+  const [taskSubjectFilter, setTaskSubjectFilter] = useState<string|null>(null)
+  const [aiPrioritizing, setAiPrioritizing] = useState(false)
+  const [newTaskTitle, setNewTaskTitle] = useState('')
+  const [newTaskSubject, setNewTaskSubject] = useState('')
+  const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('MEDIUM')
+  const [newTaskDue, setNewTaskDue] = useState('')
+
   const titles: Record<Page,string> = {dashboard:'Dashboard',tasks:'Tasks',timer:'Study Timer',calendar:'Calendar',goals:'Goals',analytics:'Analytics',notifications:'Notifications',settings:'Settings'}
+  const activeTaskCount = tasks.filter(t=>t.status==='TODO'||t.status==='IN_PROGRESS').length
   const mainNav: {id:Page,icon:string,label:string,badge?:string}[] = [
     {id:'dashboard',icon:'🏠',label:'Dashboard'},
-    {id:'tasks',icon:'✅',label:'Tasks',badge:'4'},
+    {id:'tasks',icon:'✅',label:'Tasks',badge: activeTaskCount>0 ? String(activeTaskCount) : undefined},
     {id:'timer',icon:'⏱',label:'Timer'},
     {id:'calendar',icon:'📅',label:'Calendar'},
   ]
@@ -50,6 +76,111 @@ export default function DashboardPage() {
   function resetTimer() { if(timerRef.current) clearInterval(timerRef.current); setTimerRunning(false); setTimerRemain(timerTotal) }
   function setMode(name: string, secs: number) { if(timerRef.current) clearInterval(timerRef.current); setTimerRunning(false); setTimerMode(name); setTimerTotal(secs); setTimerRemain(secs) }
   useEffect(() => () => { if(timerRef.current) clearInterval(timerRef.current) }, [])
+
+  async function loadTasks() {
+    setTasksLoading(true); setTasksError('')
+    try {
+      const res = await fetch('/api/tasks?limit=100')
+      if (res.status === 401) { router.push('/'); return }
+      const data = await res.json()
+      if (!res.ok) { setTasksError(data.error || 'Failed to load tasks'); return }
+      setTasks(data.tasks)
+    } catch {
+      setTasksError('Failed to load tasks')
+    } finally {
+      setTasksLoading(false)
+    }
+  }
+  useEffect(() => { loadTasks() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function toggleTaskStatus(task: ApiTask) {
+    const nextStatus: TaskStatus = task.status === 'COMPLETED' ? 'TODO' : 'COMPLETED'
+    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: nextStatus } : t))
+    try {
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus }),
+      })
+      if (!res.ok) throw new Error()
+      showToast(nextStatus === 'COMPLETED' ? '✅ Task complete!' : '↩ Moved back to to-do')
+    } catch {
+      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: task.status } : t))
+      showToast('⚠️ Failed to update task')
+    }
+  }
+
+  async function createTask(e: React.FormEvent) {
+    e.preventDefault()
+    const title = newTaskTitle.trim()
+    if (!title) { showToast('⚠️ Title is required'); return }
+    try {
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          subject: newTaskSubject.trim() || undefined,
+          priority: newTaskPriority,
+          dueDate: newTaskDue ? new Date(newTaskDue).toISOString() : undefined,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { showToast(data.error || '⚠️ Failed to create task'); return }
+      setTasks(prev => [data.task, ...prev])
+      setNewTaskTitle(''); setNewTaskSubject(''); setNewTaskPriority('MEDIUM'); setNewTaskDue('')
+      setTaskFormOpen(false)
+      showToast('✅ Task created!')
+    } catch {
+      showToast('⚠️ Failed to create task')
+    }
+  }
+
+  async function runAiPrioritize() {
+    setAiPrioritizing(true)
+    try {
+      const res = await fetch('/api/ai/prioritize', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) { showToast(data.error || '⚠️ AI prioritization failed'); return }
+      if (!data.results?.length) { showToast('No active tasks to prioritize'); return }
+      await loadTasks()
+      showToast(`🤖 AI re-ranked ${data.tasksAnalyzed} task${data.tasksAnalyzed === 1 ? '' : 's'}`)
+    } catch {
+      showToast('⚠️ AI prioritization failed')
+    } finally {
+      setAiPrioritizing(false)
+    }
+  }
+
+  function subjectBadgeClass(subject?: string|null) {
+    const s = (subject||'').toLowerCase()
+    if (/cs|comput|program|data\s*struct|algorithm/.test(s)) return 'b-cs'
+    if (/math|calc|algebra|stat/.test(s)) return 'b-math'
+    if (/eng|essay|writ|literat/.test(s)) return 'b-eng'
+    if (/sci|phys|bio|chem/.test(s)) return 'b-sci'
+    return 'b-med'
+  }
+  function priorityBadgeClass(priority: TaskPriority) {
+    if (priority === 'URGENT') return 'b-urg'
+    if (priority === 'HIGH') return 'b-hi'
+    return 'b-med'
+  }
+  function formatDueInfo(dueDate: string|null): {label:string, urgent:boolean} {
+    if (!dueDate) return { label: 'No due date', urgent: false }
+    const due = new Date(dueDate)
+    const diffDays = Math.ceil((due.getTime() - Date.now()) / 86400000)
+    if (diffDays < 0) return { label: '⚠ Overdue', urgent: true }
+    if (diffDays === 0) return { label: '⚠ Today', urgent: true }
+    if (diffDays === 1) return { label: '⚠ Tomorrow', urgent: true }
+    if (diffDays <= 7) return { label: `${diffDays} days`, urgent: false }
+    return { label: due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), urgent: false }
+  }
+
+  const todoTasks = tasks.filter(t => t.status==='TODO' && (!taskSubjectFilter || t.subject===taskSubjectFilter))
+  const inProgressTasks = tasks.filter(t => t.status==='IN_PROGRESS' && (!taskSubjectFilter || t.subject===taskSubjectFilter))
+  const doneTasks = tasks.filter(t => (t.status==='COMPLETED'||t.status==='CANCELLED') && (!taskSubjectFilter || t.subject===taskSubjectFilter))
+  const taskSubjects = Array.from(new Set(tasks.map(t=>t.subject).filter((s): s is string => !!s)))
+  const topPriorityTasks = tasks.filter(t=>t.status==='TODO'||t.status==='IN_PROGRESS').slice(0,3)
 
   const calEvents: Record<number,{t:string,c:string}[]> = {
     23:[{t:'Calculus PS3',c:'#6366f1'},{t:'Study 9–11AM',c:'#10b981'}],
@@ -184,6 +315,8 @@ export default function DashboardPage() {
         /* Goal form */
         .goal-form{background:var(--sur2);border:1px solid var(--bdr2);border-radius:var(--r);padding:16px;margin-bottom:16px;display:none;}
         .goal-form.open{display:block;}
+        .task-form{background:var(--sur2);border:1px solid var(--bdr2);border-radius:var(--r);padding:16px;margin-bottom:14px;display:none;}
+        .task-form.open{display:block;}
         .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}
         .f-label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin-bottom:5px;}
         .f-input{width:100%;background:var(--sur);border:1px solid var(--bdr2);border-radius:9px;padding:10px 12px;color:var(--tx);font-family:inherit;font-size:14px;outline:none;}
@@ -292,7 +425,7 @@ export default function DashboardPage() {
               {[...mainNav,...moreNav].map(item=>(
                 <button key={item.id} className={`sb-item${page===item.id?' active':''}`} onClick={()=>navTo(item.id)}>
                   <span className="sb-icon">{item.icon}</span>{item.label}
-                  {item.id==='tasks'&&<span className="sb-badge sb-badge-amb">4</span>}
+                  {item.id==='tasks'&&activeTaskCount>0&&<span className="sb-badge sb-badge-amb">{activeTaskCount}</span>}
                   {item.id==='notifications'&&!notifRead&&<span className="sb-badge sb-badge-red">3</span>}
                 </button>
               ))}
@@ -338,14 +471,26 @@ export default function DashboardPage() {
                 </div>
                 <div className="g2">
                   <div>
-                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><div style={{fontSize:13,fontWeight:700}}>🤖 AI-Prioritized Tasks</div><button className="btn btn-ai" style={{padding:'5px 10px',fontSize:11}} onClick={()=>showToast('🤖 AI re-ranking tasks...')}>✨ Re-rank</button></div>
-                    {[{title:'Data Structures',sub:[{c:'b-cs',l:'CS'},{c:'b-urg',l:'URGENT'},{c:'b-ai',l:'🤖 #1'}],due:'⚠ Tomorrow',urg:true},{title:'Calculus PS4',sub:[{c:'b-math',l:'Math'},{c:'b-hi',l:'HIGH'}],due:'2 days',urg:false},{title:'Essay Draft',sub:[{c:'b-eng',l:'English'},{c:'b-med',l:'MED'}],due:'5 days',urg:false}].map(t=>(
-                      <div key={t.title} className="task-item" onClick={()=>navTo('tasks')}>
-                        <div className="chk" onClick={e=>{e.stopPropagation();(e.currentTarget as HTMLElement).classList.toggle('done');(e.currentTarget as HTMLElement).textContent=(e.currentTarget as HTMLElement).classList.contains('done')?'✓':'';showToast('✅ Task complete!')}}/>
-                        <div className="ti-info"><div className="ti-title">{t.title}</div><div className="ti-meta">{t.sub.map(b=><span key={b.l} className={`badge ${b.c}`}>{b.l}</span>)}</div></div>
-                        <div className={`ti-due${t.urg?' urg':''}`}>{t.due}</div>
-                      </div>
-                    ))}
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><div style={{fontSize:13,fontWeight:700}}>🤖 AI-Prioritized Tasks</div><button className="btn btn-ai" style={{padding:'5px 10px',fontSize:11}} onClick={runAiPrioritize} disabled={aiPrioritizing}>{aiPrioritizing?'Analyzing...':'✨ Re-rank'}</button></div>
+                    {tasksLoading && <div style={{padding:'12px 4px',textAlign:'center',fontSize:12,color:'var(--mut)'}}>Loading tasks...</div>}
+                    {!tasksLoading && topPriorityTasks.length===0 && <div style={{padding:'12px 4px',textAlign:'center',fontSize:12,color:'var(--mut)'}}>No active tasks 🎉</div>}
+                    {!tasksLoading && topPriorityTasks.map((t,i)=>{
+                      const due = formatDueInfo(t.dueDate)
+                      return (
+                        <div key={t.id} className="task-item" onClick={()=>navTo('tasks')}>
+                          <div className="chk" onClick={e=>{e.stopPropagation();toggleTaskStatus(t)}}/>
+                          <div className="ti-info">
+                            <div className="ti-title">{t.title}</div>
+                            <div className="ti-meta">
+                              {t.subject && <span className={`badge ${subjectBadgeClass(t.subject)}`}>{t.subject}</span>}
+                              <span className={`badge ${priorityBadgeClass(t.priority)}`}>{t.priority}</span>
+                              {i===0 && t.aiPriority!=null && <span className="badge b-ai">🤖 #1</span>}
+                            </div>
+                          </div>
+                          <div className={`ti-due${due.urgent?' urg':''}`}>{due.label}</div>
+                        </div>
+                      )
+                    })}
                     <button className="btn btn-ghost" style={{width:'100%',marginTop:8}} onClick={()=>navTo('tasks')}>View all tasks →</button>
                   </div>
                   <div style={{display:'flex',flexDirection:'column',gap:12}}>
@@ -364,31 +509,73 @@ export default function DashboardPage() {
               {/* ── TASKS ── */}
               <div className={`dp${page==='tasks'?' active':''}`}>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,gap:8,flexWrap:'wrap'}}>
-                  <div style={{display:'flex',gap:6,overflowX:'auto'}}><button className="btn btn-amb" style={{padding:'6px 12px',fontSize:11,flexShrink:0}}>All</button><button className="btn btn-ghost" style={{padding:'6px 12px',fontSize:11,flexShrink:0}}>💻 CS</button><button className="btn btn-ghost" style={{padding:'6px 12px',fontSize:11,flexShrink:0}}>📐 Math</button></div>
-                  <div style={{display:'flex',gap:8}}><button className="btn btn-ai" style={{fontSize:12}} onClick={()=>showToast('🤖 AI analyzing...')}>🤖 AI Prioritize</button><button className="btn btn-amb" style={{fontSize:12}}>+ Task</button></div>
+                  <div style={{display:'flex',gap:6,overflowX:'auto'}}>
+                    <button className={`btn ${taskSubjectFilter===null?'btn-amb':'btn-ghost'}`} style={{padding:'6px 12px',fontSize:11,flexShrink:0}} onClick={()=>setTaskSubjectFilter(null)}>All</button>
+                    {taskSubjects.map(s=>(
+                      <button key={s} className={`btn ${taskSubjectFilter===s?'btn-amb':'btn-ghost'}`} style={{padding:'6px 12px',fontSize:11,flexShrink:0}} onClick={()=>setTaskSubjectFilter(s)}>{s}</button>
+                    ))}
+                  </div>
+                  <div style={{display:'flex',gap:8}}>
+                    <button className="btn btn-ai" style={{fontSize:12}} onClick={runAiPrioritize} disabled={aiPrioritizing}>{aiPrioritizing?'🤖 Analyzing...':'🤖 AI Prioritize'}</button>
+                    <button className="btn btn-amb" style={{fontSize:12}} onClick={()=>setTaskFormOpen(!taskFormOpen)}>+ Task</button>
+                  </div>
                 </div>
-                <div className="g3">
-                  {[{title:'TODO',color:'var(--mut)',badge:'b-med',count:'4',tasks:[{t:'Data Structures',bs:[{c:'b-cs',l:'CS'},{c:'b-urg',l:'URGENT'}],due:'⚠ Tomorrow',urg:true},{t:'Calculus PS4',bs:[{c:'b-math',l:'Math'}],due:'2 days',urg:false},{t:'Essay Draft',bs:[{c:'b-eng',l:'English'}],due:'5 days',urg:false},{t:'Physics Lab',bs:[{c:'b-sci',l:'Science'}],due:'Next week',urg:false}]},{title:'IN PROGRESS',color:'var(--amb)',badge:'b-cs',count:'2',tasks:[{t:'DB Systems',bs:[{c:'b-cs',l:'CS'}],due:'60%',urg:false},{t:'Math Project',bs:[{c:'b-math',l:'Math'}],due:'35%',urg:false}]},{title:'DONE',color:'var(--grn)',badge:'b-done',count:'3',tasks:[{t:'Read Ch.7',bs:[],due:'✅ Today',urg:false,done:true},{t:'Quiz Prep',bs:[],due:'✅ Yesterday',urg:false,done:true},{t:'Flash Cards',bs:[],due:'✅ 2 days ago',urg:false,done:true}]}].map(col=>(
-                    <div key={col.title}>
-                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'9px 11px',background:'var(--sur2)',border:'1px solid var(--bdr)',borderRadius:'10px 10px 0 0',borderBottom:'none'}}>
-                        <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:col.color}}>{col.title}</span>
-                        <span className={`badge ${col.badge}`}>{col.count}</span>
-                      </div>
-                      <div style={{background:'var(--sur2)',border:'1px solid var(--bdr)',borderTop:'none',borderRadius:'0 0 10px 10px',padding:8,display:'flex',flexDirection:'column',gap:6}}>
-                        {col.tasks.map(t=>(
-                          <div key={t.t} className="task-item" style={{background:'var(--bg)',...((t as {done?:boolean}).done?{opacity:.55}:{})}}>
-                            <div className={`chk${(t as {done?:boolean}).done?' done':''}`} onClick={e=>{e.stopPropagation();const el=e.currentTarget as HTMLElement;el.classList.toggle('done');el.textContent=el.classList.contains('done')?'✓':'';if(el.classList.contains('done'))showToast('✅ Task complete!')}}>{(t as {done?:boolean}).done?'✓':''}</div>
-                            <div className="ti-info">
-                              <div className="ti-title" style={(t as {done?:boolean}).done?{textDecoration:'line-through'}:{}}>{t.t}</div>
-                              {t.bs.length>0&&<div className="ti-meta">{t.bs.map(b=><span key={b.l} className={`badge ${b.c}`}>{b.l}</span>)}</div>}
-                              <div className={`ti-due${t.urg?' urg':''}`} style={{marginTop:3}}>{t.due}</div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+
+                <div className={`task-form${taskFormOpen?' open':''}`}>
+                  <form onSubmit={createTask}>
+                    <div className="form-grid">
+                      <div><label className="f-label">Title</label><input className="f-input" placeholder="e.g. Read Chapter 5" value={newTaskTitle} onChange={e=>setNewTaskTitle(e.target.value)}/></div>
+                      <div><label className="f-label">Subject</label><input className="f-input" placeholder="e.g. Calculus" value={newTaskSubject} onChange={e=>setNewTaskSubject(e.target.value)}/></div>
+                      <div><label className="f-label">Priority</label><select className="f-select" value={newTaskPriority} onChange={e=>setNewTaskPriority(e.target.value as TaskPriority)}><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select></div>
+                      <div><label className="f-label">Due Date</label><input className="f-input" type="date" value={newTaskDue} onChange={e=>setNewTaskDue(e.target.value)}/></div>
                     </div>
-                  ))}
+                    <div style={{display:'flex',gap:8}}>
+                      <button className="btn btn-amb" type="submit">Save</button>
+                      <button className="btn btn-ghost" type="button" onClick={()=>setTaskFormOpen(false)}>Cancel</button>
+                    </div>
+                  </form>
                 </div>
+
+                {tasksLoading && <div className="card" style={{textAlign:'center',color:'var(--mut)'}}>Loading tasks...</div>}
+                {tasksError && <div className="card" style={{textAlign:'center',color:'var(--red)'}}>{tasksError}</div>}
+
+                {!tasksLoading && !tasksError && (
+                  <div className="g3">
+                    {[
+                      {title:'TODO',color:'var(--mut)',badge:'b-med',list:todoTasks},
+                      {title:'IN PROGRESS',color:'var(--amb)',badge:'b-cs',list:inProgressTasks},
+                      {title:'DONE',color:'var(--grn)',badge:'b-done',list:doneTasks},
+                    ].map(col=>(
+                      <div key={col.title}>
+                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'9px 11px',background:'var(--sur2)',border:'1px solid var(--bdr)',borderRadius:'10px 10px 0 0',borderBottom:'none'}}>
+                          <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:col.color}}>{col.title}</span>
+                          <span className={`badge ${col.badge}`}>{col.list.length}</span>
+                        </div>
+                        <div style={{background:'var(--sur2)',border:'1px solid var(--bdr)',borderTop:'none',borderRadius:'0 0 10px 10px',padding:8,display:'flex',flexDirection:'column',gap:6,minHeight:60}}>
+                          {col.list.length===0 && <div style={{padding:'12px 4px',textAlign:'center',fontSize:12,color:'var(--mut)'}}>No tasks</div>}
+                          {col.list.map(t=>{
+                            const done = t.status==='COMPLETED'||t.status==='CANCELLED'
+                            const due = formatDueInfo(t.dueDate)
+                            return (
+                              <div key={t.id} className="task-item" style={{background:'var(--bg)',...(done?{opacity:.55}:{})}}>
+                                <div className={`chk${done?' done':''}`} onClick={e=>{e.stopPropagation();toggleTaskStatus(t)}}>{done?'✓':''}</div>
+                                <div className="ti-info">
+                                  <div className="ti-title" style={done?{textDecoration:'line-through'}:{}}>{t.title}</div>
+                                  <div className="ti-meta">
+                                    {t.subject && <span className={`badge ${subjectBadgeClass(t.subject)}`}>{t.subject}</span>}
+                                    {!done && <span className={`badge ${priorityBadgeClass(t.priority)}`}>{t.priority}</span>}
+                                    {t.subtasks.length>0 && <span style={{fontSize:11,color:'var(--mut)'}}>{t.subtasks.filter(s=>s.completed).length}/{t.subtasks.length} subtasks</span>}
+                                  </div>
+                                  {!done && <div className={`ti-due${due.urgent?' urg':''}`} style={{marginTop:3}}>{due.label}</div>}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* ── TIMER ── */}
