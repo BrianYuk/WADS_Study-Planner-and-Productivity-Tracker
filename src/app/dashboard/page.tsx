@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+
 
 type Task = {
   id: string
@@ -31,17 +31,6 @@ export default function DashboardPage() {
   const [notifRead, setNotifRead] = useState(false)
   const [settingsTab, setSettingsTab] = useState('profile')
   const timerRef = useRef<ReturnType<typeof setInterval>|null>(null)
-
-  const [tasks, setTasks] = useState<ApiTask[]>([])
-  const [tasksLoading, setTasksLoading] = useState(true)
-  const [tasksError, setTasksError] = useState('')
-  const [taskFormOpen, setTaskFormOpen] = useState(false)
-  const [taskSubjectFilter, setTaskSubjectFilter] = useState<string|null>(null)
-  const [aiPrioritizing, setAiPrioritizing] = useState(false)
-  const [newTaskTitle, setNewTaskTitle] = useState('')
-  const [newTaskSubject, setNewTaskSubject] = useState('')
-  const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('MEDIUM')
-  const [newTaskDue, setNewTaskDue] = useState('')
 
   // ── Real API state ──────────────────────────────────────────────
   const [tasks, setTasks] = useState<Task[]>([])
@@ -520,8 +509,6 @@ export default function DashboardPage() {
         /* Goal form */
         .goal-form{background:var(--sur2);border:1px solid var(--bdr2);border-radius:var(--r);padding:16px;margin-bottom:16px;display:none;}
         .goal-form.open{display:block;}
-        .task-form{background:var(--sur2);border:1px solid var(--bdr2);border-radius:var(--r);padding:16px;margin-bottom:14px;display:none;}
-        .task-form.open{display:block;}
         .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}
         .f-label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin-bottom:5px;}
         .f-input{width:100%;background:var(--sur);border:1px solid var(--bdr2);border-radius:9px;padding:10px 12px;color:var(--tx);font-family:inherit;font-size:14px;outline:none;}
@@ -676,26 +663,14 @@ export default function DashboardPage() {
                 </div>
                 <div className="g2">
                   <div>
-                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><div style={{fontSize:13,fontWeight:700}}>🤖 AI-Prioritized Tasks</div><button className="btn btn-ai" style={{padding:'5px 10px',fontSize:11}} onClick={runAiPrioritize} disabled={aiPrioritizing}>{aiPrioritizing?'Analyzing...':'✨ Re-rank'}</button></div>
-                    {tasksLoading && <div style={{padding:'12px 4px',textAlign:'center',fontSize:12,color:'var(--mut)'}}>Loading tasks...</div>}
-                    {!tasksLoading && topPriorityTasks.length===0 && <div style={{padding:'12px 4px',textAlign:'center',fontSize:12,color:'var(--mut)'}}>No active tasks 🎉</div>}
-                    {!tasksLoading && topPriorityTasks.map((t,i)=>{
-                      const due = formatDueInfo(t.dueDate)
-                      return (
-                        <div key={t.id} className="task-item" onClick={()=>navTo('tasks')}>
-                          <div className="chk" onClick={e=>{e.stopPropagation();toggleTaskStatus(t)}}/>
-                          <div className="ti-info">
-                            <div className="ti-title">{t.title}</div>
-                            <div className="ti-meta">
-                              {t.subject && <span className={`badge ${subjectBadgeClass(t.subject)}`}>{t.subject}</span>}
-                              <span className={`badge ${priorityBadgeClass(t.priority)}`}>{t.priority}</span>
-                              {i===0 && t.aiPriority!=null && <span className="badge b-ai">🤖 #1</span>}
-                            </div>
-                          </div>
-                          <div className={`ti-due${due.urgent?' urg':''}`}>{due.label}</div>
-                        </div>
-                      )
-                    })}
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><div style={{fontSize:13,fontWeight:700}}>🤖 AI-Prioritized Tasks</div><button className="btn btn-ai" style={{padding:'5px 10px',fontSize:11}} onClick={()=>showToast('🤖 AI re-ranking tasks...')}>✨ Re-rank</button></div>
+                    {[{title:'Data Structures',sub:[{c:'b-cs',l:'CS'},{c:'b-urg',l:'URGENT'},{c:'b-ai',l:'🤖 #1'}],due:'⚠ Tomorrow',urg:true},{title:'Calculus PS4',sub:[{c:'b-math',l:'Math'},{c:'b-hi',l:'HIGH'}],due:'2 days',urg:false},{title:'Essay Draft',sub:[{c:'b-eng',l:'English'},{c:'b-med',l:'MED'}],due:'5 days',urg:false}].map(t=>(
+                      <div key={t.title} className="task-item" onClick={()=>navTo('tasks')}>
+                        <div className="chk" onClick={e=>{e.stopPropagation();(e.currentTarget as HTMLElement).classList.toggle('done');(e.currentTarget as HTMLElement).textContent=(e.currentTarget as HTMLElement).classList.contains('done')?'✓':'';showToast('✅ Task complete!')}}/>
+                        <div className="ti-info"><div className="ti-title">{t.title}</div><div className="ti-meta">{t.sub.map(b=><span key={b.l} className={`badge ${b.c}`}>{b.l}</span>)}</div></div>
+                        <div className={`ti-due${t.urg?' urg':''}`}>{t.due}</div>
+                      </div>
+                    ))}
                     <button className="btn btn-ghost" style={{width:'100%',marginTop:8}} onClick={()=>navTo('tasks')}>View all tasks →</button>
                   </div>
                   <div style={{display:'flex',flexDirection:'column',gap:12}}>
