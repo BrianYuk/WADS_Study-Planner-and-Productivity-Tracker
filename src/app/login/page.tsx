@@ -2,7 +2,6 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { signIn } from 'next-auth/react'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -11,18 +10,6 @@ export default function LoginPage() {
   const [showPwd, setShowPwd] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [googleLoading, setGoogleLoading] = useState(false)
-
-  async function handleGoogleSignIn() {
-    setGoogleLoading(true)
-    setError('')
-    try {
-      await signIn('google', { callbackUrl: '/dashboard' })
-    } catch {
-      setError('Google sign-in failed. Please try again.')
-      setGoogleLoading(false)
-    }
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault(); setError('')
@@ -122,11 +109,7 @@ export default function LoginPage() {
               </div>
               <button type="submit" className="submit" disabled={loading}>{loading?<><div className="spin"/>Signing in...</>:'Sign In →'}</button>
             </form>
-            <button type="button" className="google-btn" onClick={handleGoogleSignIn} disabled={googleLoading}>
-              <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.14 0 5.95 1.08 8.17 2.84l6.09-6.09C34.46 3.19 29.5 1 24 1 14.82 1 7.05 6.48 3.53 14.36l7.1 5.52C12.32 13.74 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.57-.14-3.09-.4-4.56H24v8.63h12.67c-.55 2.94-2.2 5.43-4.68 7.1l7.18 5.58C43.04 37.4 46.5 31.38 46.5 24.5z"/><path fill="#FBBC05" d="M10.63 28.62A14.47 14.47 0 0 1 9.5 24c0-1.6.27-3.15.76-4.6l-7.1-5.52A23.94 23.94 0 0 0 0 24c0 3.87.93 7.53 2.55 10.74l8.08-6.12z"/><path fill="#34A853" d="M24 47c5.5 0 10.12-1.82 13.5-4.94l-7.18-5.58c-1.87 1.25-4.27 2.02-6.32 2.02-6.3 0-11.68-4.24-13.37-9.88l-8.08 6.12C7.05 41.52 14.82 47 24 47z"/></svg>
-              {googleLoading ? 'Connecting...' : 'Continue with Google'}
-            </button>
-            <div className="divider">or</div>
+            {/* Google OAuth implemented but disabled for demo — requires production credentials */}
             <button className="demo" onClick={()=>{setEmail('demo@kiraflow.app');setPassword('Demo1234!')}}>🎮 Fill Demo Credentials</button>
             <div className="bottom">New here? <Link href="/register">Create a free account</Link></div>
           </div>

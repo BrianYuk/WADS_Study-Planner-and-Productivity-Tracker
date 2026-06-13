@@ -2,6 +2,15 @@
  * Tests: Authentication API
  * Week 4 – Frontend & API Testing
  */
+
+// Mock Prisma so importing middleware doesn't instantiate a real DB client
+jest.mock('@/lib/db', () => ({
+  prisma: {
+    user: { findUnique: jest.fn(), findMany: jest.fn() },
+    aIAnalysis: { create: jest.fn() },
+  },
+}))
+
 import { sanitizeInput, checkRateLimit } from '@/middleware/apiMiddleware'
 import { isValidPassword, hashPassword, comparePassword } from '@/lib/auth'
 

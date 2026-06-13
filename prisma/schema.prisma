@@ -166,7 +166,7 @@ model AIAnalysis {
   type        AIType
   input       Json
   output      Json
-  model       String    @default("gpt-4o-mini")
+  model       String    @default("llama-3.3-70b-versatile")
   tokensUsed  Int?
   latencyMs   Int?
   createdAt   DateTime  @default(now())
@@ -236,6 +236,7 @@ enum NotifType {
 enum AIType {
   TASK_PRIORITIZATION
   SCHEDULE_OPTIMIZATION
+  STUDY_QA
   PRODUCTIVITY_ANALYSIS
   STUDY_RECOMMENDATION
 }
