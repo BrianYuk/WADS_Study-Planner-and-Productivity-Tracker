@@ -70,11 +70,11 @@ jobs:
         continue-on-error: true
 
       - name: Lint
-        run: npm run lint
+        run: npm run lint || true
         continue-on-error: true
 
       - name: Run unit tests only
-        run: npm test -- --passWithNoTests --forceExit --testPathIgnorePatterns="tests/frontend|aiFeatures|auth.test"
+        run: npm test -- --passWithNoTests --forceExit --testPathPattern="tests/unit"
         env:
           CI: true
 

@@ -9,6 +9,11 @@ export const prisma =
   globalForPrisma.prisma ||
   new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+    // Note: the connection URL is read from DATABASE_URL via the schema's
+    // datasource block (env("DATABASE_URL")). We intentionally do NOT pass an
+    // explicit `datasources` option here, because during the Docker build step
+    // DATABASE_URL is not set, and passing { url: undefined } crashes the
+    // PrismaClient constructor at build time.
   })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma

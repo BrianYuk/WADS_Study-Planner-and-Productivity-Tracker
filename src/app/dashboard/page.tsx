@@ -1,23 +1,22 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
-type Page = 'dashboard'|'tasks'|'timer'|'calendar'|'goals'|'analytics'|'notifications'|'settings'
-
-type TaskPriority = 'LOW'|'MEDIUM'|'HIGH'|'URGENT'
-type TaskStatus = 'TODO'|'IN_PROGRESS'|'COMPLETED'|'CANCELLED'
-type ApiTask = {
+type Task = {
   id: string
   title: string
-  subject: string | null
-  priority: TaskPriority
-  status: TaskStatus
-  dueDate: string | null
+  description?: string | null
+  subject?: string | null
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'
+  status: 'TODO' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED'
+  dueDate?: string | null
+  estimatedMins?: number | null
+  aiPriority?: number | null
   tags: string[]
-  aiPriority: number | null
-  subtasks: { id: string; title: string; completed: boolean }[]
 }
+
+type Page = 'dashboard'|'tasks'|'kira'|'timer'|'calendar'|'goals'|'analytics'|'notifications'|'settings'
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -44,11 +43,45 @@ export default function DashboardPage() {
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('MEDIUM')
   const [newTaskDue, setNewTaskDue] = useState('')
 
-  const titles: Record<Page,string> = {dashboard:'Dashboard',tasks:'Tasks',timer:'Study Timer',calendar:'Calendar',goals:'Goals',analytics:'Analytics',notifications:'Notifications',settings:'Settings'}
-  const activeTaskCount = tasks.filter(t=>t.status==='TODO'||t.status==='IN_PROGRESS').length
+  // ── Real API state ──────────────────────────────────────────────
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [tasksLoading, setTasksLoading] = useState(false)
+  const [showAddTask, setShowAddTask] = useState(false)
+  const [newTask, setNewTask] = useState({ title: '', subject: '', priority: 'MEDIUM' as Task['priority'], dueDate: '' })
+  const [taskError, setTaskError] = useState('')
+  const [aiPrioritizing, setAiPrioritizing] = useState(false)
+  const [userName, setUserName] = useState('Student')
+  const [userEmail, setUserEmail] = useState('')
+  // Kira AI Chat state
+  const [chatMessages, setChatMessages] = useState<{role:'user'|'assistant',content:string}[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatSubject, setChatSubject] = useState('General')
+  const [chatLoading, setChatLoading] = useState(false)
+  const chatEndRef = useRef<HTMLDivElement|null>(null)
+  // Goals state
+  type Goal = { id:string, title:string, description?:string|null, targetDate:string, targetValue:number, currentValue:number, unit:string, type:string, status:string }
+  const [goals, setGoals] = useState<Goal[]>([])
+  const [newGoal, setNewGoal] = useState({ title:'', type:'WEEKLY', targetValue:'', unit:'hours', targetDate:'' })
+  const [goalError, setGoalError] = useState('')
+  // Sessions + Analytics state
+  const [sessionStart, setSessionStart] = useState<number|null>(null)
+  const [sessionSubject, setSessionSubject] = useState('')
+  type DailyData = { date:string, label:string, studyMins:number, sessionCount:number, avgFocus:number }
+  type SubjectData = { subject:string, totalMins:number, sessions:number }
+  type Analytics = {
+    tasks: { total:number, todo:number, inProgress:number, completed:number, cancelled:number }
+    study: { totalMins7Days:number, sessionCount7Days:number, avgFocusScore:number }
+    dailyData: DailyData[]
+    subjectBreakdown: SubjectData[]
+  }
+  const [analytics, setAnalytics] = useState<Analytics|null>(null)
+  const [analyticsLoading, setAnalyticsLoading] = useState(false)
+
+  const titles: Record<Page,string> = {dashboard:'Dashboard',tasks:'Tasks',kira:'Ask Kira',timer:'Study Timer',calendar:'Calendar',goals:'Goals',analytics:'Analytics',notifications:'Notifications',settings:'Settings'}
   const mainNav: {id:Page,icon:string,label:string,badge?:string}[] = [
     {id:'dashboard',icon:'🏠',label:'Dashboard'},
-    {id:'tasks',icon:'✅',label:'Tasks',badge: activeTaskCount>0 ? String(activeTaskCount) : undefined},
+    {id:'tasks',icon:'✅',label:'Tasks',badge:'4'},
+    {id:'kira',icon:'🤖',label:'Ask Kira'},
     {id:'timer',icon:'⏱',label:'Timer'},
     {id:'calendar',icon:'📅',label:'Calendar'},
   ]
@@ -67,120 +100,292 @@ export default function DashboardPage() {
   function toggleTimer() {
     if (timerRunning) { if(timerRef.current) clearInterval(timerRef.current); setTimerRunning(false) }
     else {
+      if (!sessionStart) setSessionStart(Date.now())
       setTimerRunning(true)
       timerRef.current = setInterval(() => {
-        setTimerRemain(r => { if (r <= 1) { clearInterval(timerRef.current!); setTimerRunning(false); return 0 } return r-1 })
+        setTimerRemain((r:number) => {
+          if (r <= 1) {
+            clearInterval(timerRef.current!)
+            setTimerRunning(false)
+            // Auto-save session when timer completes (skip break mode)
+            if (timerMode !== 'Break') saveSession(timerTotal)
+            return 0
+          }
+          return r-1
+        })
       }, 1000)
     }
+  }
+
+  // Manually finish and save the current session
+  function finishSession() {
+    if(timerRef.current) clearInterval(timerRef.current)
+    setTimerRunning(false)
+    const elapsed = timerTotal - timerRemain
+    if (elapsed >= 60 && timerMode !== 'Break') {
+      saveSession(elapsed)
+    } else {
+      showToast('Session too short to save (min 1 min)')
+    }
+    setTimerRemain(timerTotal)
   }
   function resetTimer() { if(timerRef.current) clearInterval(timerRef.current); setTimerRunning(false); setTimerRemain(timerTotal) }
   function setMode(name: string, secs: number) { if(timerRef.current) clearInterval(timerRef.current); setTimerRunning(false); setTimerMode(name); setTimerTotal(secs); setTimerRemain(secs) }
   useEffect(() => () => { if(timerRef.current) clearInterval(timerRef.current) }, [])
 
-  async function loadTasks() {
-    setTasksLoading(true); setTasksError('')
+  // ── Fetch tasks from real API ─────────────────────────────────
+  const fetchTasks = useCallback(async () => {
+    setTasksLoading(true)
     try {
-      const res = await fetch('/api/tasks?limit=100')
-      if (res.status === 401) { router.push('/'); return }
-      const data = await res.json()
-      if (!res.ok) { setTasksError(data.error || 'Failed to load tasks'); return }
-      setTasks(data.tasks)
-    } catch {
-      setTasksError('Failed to load tasks')
+      const res = await fetch('/api/tasks')
+      if (res.ok) {
+        const data = await res.json()
+        setTasks(data.tasks || [])
+      } else if (res.status === 401) {
+        router.push('/login')
+      }
+    } catch (err) {
+      console.error('Failed to fetch tasks:', err)
     } finally {
       setTasksLoading(false)
     }
-  }
-  useEffect(() => { loadTasks() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [router])
 
-  async function toggleTaskStatus(task: ApiTask) {
-    const nextStatus: TaskStatus = task.status === 'COMPLETED' ? 'TODO' : 'COMPLETED'
-    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: nextStatus } : t))
+  // ── Fetch user info ───────────────────────────────────────────
+  const fetchUser = useCallback(async () => {
+    try {
+      const res = await fetch('/api/auth/me')
+      if (res.ok) {
+        const data = await res.json()
+        if (data?.user?.name) setUserName(data.user.name)
+        if (data?.user?.email) setUserEmail(data.user.email)
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    fetchTasks()
+    fetchUser()
+  }, [fetchTasks, fetchUser])
+
+  // ── Create task ───────────────────────────────────────────────
+  async function createTask() {
+    if (!newTask.title.trim()) { setTaskError('Title is required'); return }
+    setTaskError('')
+    try {
+      const body: Record<string, unknown> = {
+        title: newTask.title,
+        priority: newTask.priority,
+      }
+      if (newTask.subject) body.subject = newTask.subject
+      if (newTask.dueDate) body.dueDate = new Date(newTask.dueDate).toISOString()
+
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (res.ok) {
+        setNewTask({ title: '', subject: '', priority: 'MEDIUM', dueDate: '' })
+        setShowAddTask(false)
+        showToast('✅ Task created!')
+        fetchTasks()
+      } else {
+        const err = await res.json()
+        setTaskError(err.error || 'Failed to create task')
+      }
+    } catch {
+      setTaskError('Network error')
+    }
+  }
+
+  // ── Toggle task complete ──────────────────────────────────────
+  async function toggleTask(task: Task) {
+    const newStatus = task.status === 'COMPLETED' ? 'TODO' : 'COMPLETED'
     try {
       const res = await fetch(`/api/tasks/${task.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: nextStatus }),
+        body: JSON.stringify({ status: newStatus }),
       })
-      if (!res.ok) throw new Error()
-      showToast(nextStatus === 'COMPLETED' ? '✅ Task complete!' : '↩ Moved back to to-do')
-    } catch {
-      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: task.status } : t))
-      showToast('⚠️ Failed to update task')
-    }
+      if (res.ok) {
+        setTasks((prev:Task[]) => prev.map((t:Task) => t.id === task.id ? { ...t, status: newStatus } : t))
+        if (newStatus === 'COMPLETED') showToast('✅ Task complete!')
+      }
+    } catch {}
   }
 
-  async function createTask(e: React.FormEvent) {
-    e.preventDefault()
-    const title = newTaskTitle.trim()
-    if (!title) { showToast('⚠️ Title is required'); return }
+  // ── Delete task ───────────────────────────────────────────────
+  async function deleteTask(taskId: string) {
     try {
-      const res = await fetch('/api/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          subject: newTaskSubject.trim() || undefined,
-          priority: newTaskPriority,
-          dueDate: newTaskDue ? new Date(newTaskDue).toISOString() : undefined,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) { showToast(data.error || '⚠️ Failed to create task'); return }
-      setTasks(prev => [data.task, ...prev])
-      setNewTaskTitle(''); setNewTaskSubject(''); setNewTaskPriority('MEDIUM'); setNewTaskDue('')
-      setTaskFormOpen(false)
-      showToast('✅ Task created!')
-    } catch {
-      showToast('⚠️ Failed to create task')
-    }
+      const res = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
+      if (res.ok) {
+        setTasks((prev:Task[]) => prev.filter((t:Task) => t.id !== taskId))
+        showToast('🗑 Task deleted')
+      }
+    } catch {}
   }
 
-  async function runAiPrioritize() {
+  // ── AI Prioritize ─────────────────────────────────────────────
+  async function aiPrioritize() {
     setAiPrioritizing(true)
+    showToast('🤖 AI analyzing your tasks...')
     try {
       const res = await fetch('/api/ai/prioritize', { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) { showToast(data.error || '⚠️ AI prioritization failed'); return }
-      if (!data.results?.length) { showToast('No active tasks to prioritize'); return }
-      await loadTasks()
-      showToast(`🤖 AI re-ranked ${data.tasksAnalyzed} task${data.tasksAnalyzed === 1 ? '' : 's'}`)
+      if (res.ok) {
+        showToast('✨ Tasks re-prioritized by AI!')
+        fetchTasks()
+      } else {
+        showToast('⚠️ AI unavailable, try again')
+      }
     } catch {
-      showToast('⚠️ AI prioritization failed')
+      showToast('⚠️ AI unavailable')
     } finally {
       setAiPrioritizing(false)
     }
   }
 
-  function subjectBadgeClass(subject?: string|null) {
-    const s = (subject||'').toLowerCase()
-    if (/cs|comput|program|data\s*struct|algorithm/.test(s)) return 'b-cs'
-    if (/math|calc|algebra|stat/.test(s)) return 'b-math'
-    if (/eng|essay|writ|literat/.test(s)) return 'b-eng'
-    if (/sci|phys|bio|chem/.test(s)) return 'b-sci'
-    return 'b-med'
-  }
-  function priorityBadgeClass(priority: TaskPriority) {
-    if (priority === 'URGENT') return 'b-urg'
-    if (priority === 'HIGH') return 'b-hi'
-    return 'b-med'
-  }
-  function formatDueInfo(dueDate: string|null): {label:string, urgent:boolean} {
-    if (!dueDate) return { label: 'No due date', urgent: false }
-    const due = new Date(dueDate)
-    const diffDays = Math.ceil((due.getTime() - Date.now()) / 86400000)
-    if (diffDays < 0) return { label: '⚠ Overdue', urgent: true }
-    if (diffDays === 0) return { label: '⚠ Today', urgent: true }
-    if (diffDays === 1) return { label: '⚠ Tomorrow', urgent: true }
-    if (diffDays <= 7) return { label: `${diffDays} days`, urgent: false }
-    return { label: due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), urgent: false }
+  // ── Goals ─────────────────────────────────────────────────────
+  const fetchGoals = useCallback(async () => {
+    try {
+      const res = await fetch('/api/goals')
+      if (res.ok) {
+        const data = await res.json()
+        setGoals(data.goals || [])
+      }
+    } catch (err) { console.error('Failed to fetch goals:', err) }
+  }, [])
+
+  useEffect(() => { fetchGoals() }, [fetchGoals])
+
+  async function createGoal() {
+    if (!newGoal.title.trim()) { setGoalError('Title is required'); return }
+    if (!newGoal.targetValue || Number(newGoal.targetValue) <= 0) { setGoalError('Target must be a positive number'); return }
+    if (!newGoal.targetDate) { setGoalError('Target date is required'); return }
+    setGoalError('')
+    try {
+      const res = await fetch('/api/goals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newGoal.title,
+          type: newGoal.type,
+          targetValue: Number(newGoal.targetValue),
+          unit: newGoal.unit,
+          targetDate: new Date(newGoal.targetDate).toISOString(),
+        }),
+      })
+      if (res.ok) {
+        setNewGoal({ title:'', type:'WEEKLY', targetValue:'', unit:'hours', targetDate:'' })
+        setGoalFormOpen(false)
+        showToast('🎯 Goal created!')
+        fetchGoals()
+      } else {
+        const err = await res.json()
+        setGoalError(err.error || 'Failed to create goal')
+      }
+    } catch { setGoalError('Network error') }
   }
 
-  const todoTasks = tasks.filter(t => t.status==='TODO' && (!taskSubjectFilter || t.subject===taskSubjectFilter))
-  const inProgressTasks = tasks.filter(t => t.status==='IN_PROGRESS' && (!taskSubjectFilter || t.subject===taskSubjectFilter))
-  const doneTasks = tasks.filter(t => (t.status==='COMPLETED'||t.status==='CANCELLED') && (!taskSubjectFilter || t.subject===taskSubjectFilter))
-  const taskSubjects = Array.from(new Set(tasks.map(t=>t.subject).filter((s): s is string => !!s)))
-  const topPriorityTasks = tasks.filter(t=>t.status==='TODO'||t.status==='IN_PROGRESS').slice(0,3)
+  // ── Sessions ──────────────────────────────────────────────────
+  async function saveSession(durationSecs: number) {
+    const durationMins = Math.max(1, Math.round(durationSecs / 60))
+    const start = sessionStart ? new Date(sessionStart) : new Date(Date.now() - durationSecs * 1000)
+    try {
+      const typeMap: Record<string,string> = { 'Pomodoro':'POMODORO', 'Deep Work':'DEEP_WORK', 'Break':'POMODORO' }
+      const body: Record<string, unknown> = {
+        startTime: start.toISOString(),
+        endTime: new Date().toISOString(),
+        durationMins,
+        type: typeMap[timerMode] || 'POMODORO',
+        focusScore: 80,
+      }
+      if (sessionSubject) body.subject = sessionSubject
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (res.ok) {
+        showToast('✅ Session saved!')
+        fetchAnalytics()
+      }
+    } catch (err) { console.error('Failed to save session:', err) }
+    setSessionStart(null)
+  }
+
+  // ── Analytics ─────────────────────────────────────────────────
+  const fetchAnalytics = useCallback(async () => {
+    setAnalyticsLoading(true)
+    try {
+      const res = await fetch('/api/analytics/dashboard')
+      if (res.ok) {
+        const data = await res.json()
+        setAnalytics(data)
+      }
+    } catch (err) { console.error('Failed to fetch analytics:', err) }
+    finally { setAnalyticsLoading(false) }
+  }, [])
+
+  useEffect(() => { fetchAnalytics() }, [fetchAnalytics])
+
+  // ── Kira AI Chat ──────────────────────────────────────────────
+  async function sendChatMessage() {
+    const question = chatInput.trim()
+    if (!question || chatLoading) return
+
+    const userMsg = { role: 'user' as const, content: question }
+    const newHistory = [...chatMessages, userMsg]
+    setChatMessages(newHistory)
+    setChatInput('')
+    setChatLoading(true)
+
+    try {
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question,
+          subject: chatSubject,
+          history: chatMessages.slice(-6),
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setChatMessages([...newHistory, { role: 'assistant', content: data.answer }])
+      } else {
+        setChatMessages([...newHistory, { role: 'assistant', content: 'Sorry, I had trouble answering. Please try again.' }])
+      }
+    } catch {
+      setChatMessages([...newHistory, { role: 'assistant', content: 'Network error. Please check your connection.' }])
+    } finally {
+      setChatLoading(false)
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+    }
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────
+  const todoTasks       = tasks.filter(t => t.status === 'TODO')
+  const inProgressTasks = tasks.filter(t => t.status === 'IN_PROGRESS')
+  const doneTasks       = tasks.filter(t => t.status === 'COMPLETED')
+
+  function priorityColor(p: string) {
+    if (p === 'URGENT') return '#ef4444'
+    if (p === 'HIGH')   return '#f59e0b'
+    if (p === 'MEDIUM') return '#6366f1'
+    return '#475569'
+  }
+
+  function formatDue(dateStr?: string | null) {
+    if (!dateStr) return null
+    const due = new Date(dateStr)
+    const now = new Date()
+    const diff = Math.ceil((due.getTime() - now.getTime()) / 86400000)
+    if (diff < 0)  return { label: `${Math.abs(diff)}d overdue`, urgent: true }
+    if (diff === 0) return { label: 'Due today', urgent: true }
+    if (diff === 1) return { label: 'Due tomorrow', urgent: true }
+    return { label: `${diff} days`, urgent: false }
+  }
 
   const calEvents: Record<number,{t:string,c:string}[]> = {
     23:[{t:'Calculus PS3',c:'#6366f1'},{t:'Study 9–11AM',c:'#10b981'}],
@@ -425,14 +630,14 @@ export default function DashboardPage() {
               {[...mainNav,...moreNav].map(item=>(
                 <button key={item.id} className={`sb-item${page===item.id?' active':''}`} onClick={()=>navTo(item.id)}>
                   <span className="sb-icon">{item.icon}</span>{item.label}
-                  {item.id==='tasks'&&activeTaskCount>0&&<span className="sb-badge sb-badge-amb">{activeTaskCount}</span>}
+                  {item.id==='tasks'&&todoTasks.length>0&&<span className="sb-badge sb-badge-amb">{todoTasks.length}</span>}
                   {item.id==='notifications'&&!notifRead&&<span className="sb-badge sb-badge-red">3</span>}
                 </button>
               ))}
             </nav>
             <button className="sb-user" onClick={()=>navTo('settings')}>
-              <div className="av">A</div>
-              <div style={{flex:1,minWidth:0}}><div className="sb-uname">Aditya Pratama</div><div className="sb-urole">Student · BINUS</div></div>
+              <div className="av">{userName.charAt(0).toUpperCase()}</div>
+              <div style={{flex:1,minWidth:0}}><div className="sb-uname">{userName}</div><div className="sb-urole">Student · BINUS</div></div>
               <div className="online-dot"/>
             </button>
           </aside>
@@ -456,16 +661,16 @@ export default function DashboardPage() {
               {/* ── DASHBOARD ── */}
               <div className={`dp${page==='dashboard'?' active':''}`}>
                 <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10,marginBottom:16,flexWrap:'wrap'}}>
-                  <div><div style={{fontSize:12,color:'var(--mut)',marginBottom:2}}>Good morning ☀️</div><div style={{fontSize:20,fontWeight:900,letterSpacing:'-0.02em'}}>Welcome back, Aditya</div></div>
+                  <div><div style={{fontSize:12,color:'var(--mut)',marginBottom:2}}>Good morning ☀️</div><div style={{fontSize:20,fontWeight:900,letterSpacing:'-0.02em'}}>Welcome back, {userName.split(' ')[0]}</div></div>
                   <div style={{display:'flex',gap:8}}><button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>navTo('timer')}>⏱ Start Session</button><button className="btn btn-amb" style={{fontSize:12}} onClick={()=>navTo('tasks')}>+ New Task</button></div>
                 </div>
                 <div className="ai-banner">
                   <div className="ai-icon">🤖</div>
-                  <div style={{flex:1,minWidth:0}}><div style={{fontWeight:700,fontSize:13,marginBottom:2}}>AI Wellness Check · Today</div><div style={{fontSize:12,color:'var(--tx2)'}}>Consistent 3–4hr sessions, 78% avg focus, 2 overdue tasks. Sustainable pattern.</div><span className="risk-pill">● LOW BURNOUT RISK</span></div>
-                  <div style={{textAlign:'right',flexShrink:0}}><div style={{fontSize:10,color:'var(--mut)'}}>Wellness</div><div style={{fontSize:26,fontWeight:900,fontFamily:"'DM Mono',monospace",color:'var(--grn)'}}>82</div></div>
+                  <div style={{flex:1,minWidth:0}}><div style={{fontWeight:700,fontSize:13,marginBottom:2}}>Meet Kira, your AI study companion</div><div style={{fontSize:12,color:'var(--tx2)'}}>Ask study questions, get AI task prioritization, and optimize your schedule. {tasks.filter(t=>t.status!=='COMPLETED').length} active task{tasks.filter(t=>t.status!=='COMPLETED').length===1?'':'s'} right now.</div></div>
+                  <div style={{flexShrink:0}}><button className="btn btn-amb" style={{fontSize:12}} onClick={()=>navTo('kira')}>Ask Kira →</button></div>
                 </div>
                 <div className="g4" style={{marginBottom:14}}>
-                  {[{l:'⏱ Today',v:'2h 40m',c:'var(--amb)',d:'↑ +30m',cl:'up'},{l:'✅ Done',v:'3',c:'var(--grn)',d:'↑ +1',cl:'up'},{l:'🔥 Streak',v:'7 days',c:'#f97316',d:'Best: 12d',cl:''},{l:'🎯 Goal',v:'68%',c:'var(--tx)',d:'',cl:''}].map(s=>(
+                  {[{l:'⏱ This Week',v:analytics?`${(analytics.study.totalMins7Days/60).toFixed(1)}h`:'0h',c:'var(--amb)',d:`${analytics?.study.sessionCount7Days||0} sessions`,cl:''},{l:'✅ Done',v:`${doneTasks.length}`,c:'var(--grn)',d:`of ${tasks.length}`,cl:''},{l:'📋 To Do',v:`${todoTasks.length}`,c:'#f97316',d:'pending',cl:''},{l:'🎯 Focus',v:analytics?`${analytics.study.avgFocusScore}`:'0',c:'var(--tx)',d:'avg score',cl:''}].map(s=>(
                     <div key={s.l} className="sc"><div className="sc-l">{s.l}</div><div className="sc-v" style={{color:s.c}}>{s.v}</div>{s.d&&<span className={`delta ${s.cl}`}>{s.d}</span>}{s.l.includes('Goal')&&<div className="pt" style={{marginTop:7}}><div className="pf" style={{width:'68%',background:'linear-gradient(90deg,#6366f1,#f59e0b)'}}/></div>}</div>
                   ))}
                 </div>
@@ -507,78 +712,164 @@ export default function DashboardPage() {
               </div>
 
               {/* ── TASKS ── */}
-              <div className={`dp${page==='tasks'?' active':''}`}>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,gap:8,flexWrap:'wrap'}}>
-                  <div style={{display:'flex',gap:6,overflowX:'auto'}}>
-                    <button className={`btn ${taskSubjectFilter===null?'btn-amb':'btn-ghost'}`} style={{padding:'6px 12px',fontSize:11,flexShrink:0}} onClick={()=>setTaskSubjectFilter(null)}>All</button>
-                    {taskSubjects.map(s=>(
-                      <button key={s} className={`btn ${taskSubjectFilter===s?'btn-amb':'btn-ghost'}`} style={{padding:'6px 12px',fontSize:11,flexShrink:0}} onClick={()=>setTaskSubjectFilter(s)}>{s}</button>
-                    ))}
-                  </div>
+             <div className={`dp${page==='tasks'?' active':''}`}>
+                <div className="pg-hdr">
+                  <div className="pg-title">✅ Tasks</div>
                   <div style={{display:'flex',gap:8}}>
-                    <button className="btn btn-ai" style={{fontSize:12}} onClick={runAiPrioritize} disabled={aiPrioritizing}>{aiPrioritizing?'🤖 Analyzing...':'🤖 AI Prioritize'}</button>
-                    <button className="btn btn-amb" style={{fontSize:12}} onClick={()=>setTaskFormOpen(!taskFormOpen)}>+ Task</button>
+                    <button className="btn btn-ai" style={{fontSize:12}} onClick={aiPrioritize} disabled={aiPrioritizing}>
+                      {aiPrioritizing ? '⏳ Analyzing...' : '🤖 AI Prioritize'}
+                    </button>
+                    <button className="btn btn-amb" style={{fontSize:12}} onClick={()=>setShowAddTask(v=>!v)}>+ Task</button>
                   </div>
                 </div>
 
-                <div className={`task-form${taskFormOpen?' open':''}`}>
-                  <form onSubmit={createTask}>
-                    <div className="form-grid">
-                      <div><label className="f-label">Title</label><input className="f-input" placeholder="e.g. Read Chapter 5" value={newTaskTitle} onChange={e=>setNewTaskTitle(e.target.value)}/></div>
-                      <div><label className="f-label">Subject</label><input className="f-input" placeholder="e.g. Calculus" value={newTaskSubject} onChange={e=>setNewTaskSubject(e.target.value)}/></div>
-                      <div><label className="f-label">Priority</label><select className="f-select" value={newTaskPriority} onChange={e=>setNewTaskPriority(e.target.value as TaskPriority)}><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select></div>
-                      <div><label className="f-label">Due Date</label><input className="f-input" type="date" value={newTaskDue} onChange={e=>setNewTaskDue(e.target.value)}/></div>
-                    </div>
-                    <div style={{display:'flex',gap:8}}>
-                      <button className="btn btn-amb" type="submit">Save</button>
-                      <button className="btn btn-ghost" type="button" onClick={()=>setTaskFormOpen(false)}>Cancel</button>
-                    </div>
-                  </form>
-                </div>
-
-                {tasksLoading && <div className="card" style={{textAlign:'center',color:'var(--mut)'}}>Loading tasks...</div>}
-                {tasksError && <div className="card" style={{textAlign:'center',color:'var(--red)'}}>{tasksError}</div>}
-
-                {!tasksLoading && !tasksError && (
-                  <div className="g3">
-                    {[
-                      {title:'TODO',color:'var(--mut)',badge:'b-med',list:todoTasks},
-                      {title:'IN PROGRESS',color:'var(--amb)',badge:'b-cs',list:inProgressTasks},
-                      {title:'DONE',color:'var(--grn)',badge:'b-done',list:doneTasks},
-                    ].map(col=>(
-                      <div key={col.title}>
-                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'9px 11px',background:'var(--sur2)',border:'1px solid var(--bdr)',borderRadius:'10px 10px 0 0',borderBottom:'none'}}>
-                          <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:col.color}}>{col.title}</span>
-                          <span className={`badge ${col.badge}`}>{col.list.length}</span>
-                        </div>
-                        <div style={{background:'var(--sur2)',border:'1px solid var(--bdr)',borderTop:'none',borderRadius:'0 0 10px 10px',padding:8,display:'flex',flexDirection:'column',gap:6,minHeight:60}}>
-                          {col.list.length===0 && <div style={{padding:'12px 4px',textAlign:'center',fontSize:12,color:'var(--mut)'}}>No tasks</div>}
-                          {col.list.map(t=>{
-                            const done = t.status==='COMPLETED'||t.status==='CANCELLED'
-                            const due = formatDueInfo(t.dueDate)
-                            return (
-                              <div key={t.id} className="task-item" style={{background:'var(--bg)',...(done?{opacity:.55}:{})}}>
-                                <div className={`chk${done?' done':''}`} onClick={e=>{e.stopPropagation();toggleTaskStatus(t)}}>{done?'✓':''}</div>
-                                <div className="ti-info">
-                                  <div className="ti-title" style={done?{textDecoration:'line-through'}:{}}>{t.title}</div>
-                                  <div className="ti-meta">
-                                    {t.subject && <span className={`badge ${subjectBadgeClass(t.subject)}`}>{t.subject}</span>}
-                                    {!done && <span className={`badge ${priorityBadgeClass(t.priority)}`}>{t.priority}</span>}
-                                    {t.subtasks.length>0 && <span style={{fontSize:11,color:'var(--mut)'}}>{t.subtasks.filter(s=>s.completed).length}/{t.subtasks.length} subtasks</span>}
-                                  </div>
-                                  {!done && <div className={`ti-due${due.urgent?' urg':''}`} style={{marginTop:3}}>{due.label}</div>}
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
+                {showAddTask && (
+                  <div style={{background:'var(--sur)',border:'1px solid var(--bdr)',borderRadius:'var(--r)',padding:16,marginBottom:12}}>
+                    <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>New Task</div>
+                    {taskError && <div style={{background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#fca5a5',marginBottom:10}}>{taskError}</div>}
+                    <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                      <input placeholder="Task title *" value={newTask.title} onChange={e=>setNewTask(v=>({...v,title:e.target.value}))}
+                        style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:8,padding:'9px 12px',color:'var(--tx)',fontSize:13,outline:'none',width:'100%'}}/>
+                      <div style={{display:'flex',gap:8}}>
+                        <input placeholder="Subject (optional)" value={newTask.subject} onChange={e=>setNewTask(v=>({...v,subject:e.target.value}))}
+                          style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:8,padding:'9px 12px',color:'var(--tx)',fontSize:13,outline:'none',flex:1}}/>
+                        <select value={newTask.priority} onChange={e=>setNewTask(v=>({...v,priority:e.target.value as Task['priority']}))}
+                          style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:8,padding:'9px 12px',color:'var(--tx)',fontSize:13,outline:'none'}}>
+                          <option value="LOW">Low</option>
+                          <option value="MEDIUM">Medium</option>
+                          <option value="HIGH">High</option>
+                          <option value="URGENT">Urgent</option>
+                        </select>
                       </div>
-                    ))}
+                      <input type="datetime-local" value={newTask.dueDate} onChange={e=>setNewTask(v=>({...v,dueDate:e.target.value}))}
+                        style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:8,padding:'9px 12px',color:'var(--tx)',fontSize:13,outline:'none',width:'100%'}}/>
+                      <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+                        <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>{setShowAddTask(false);setTaskError('')}}>Cancel</button>
+                        <button className="btn btn-amb" style={{fontSize:12}} onClick={createTask}>Create Task</button>
+                      </div>
+                    </div>
                   </div>
                 )}
+
+                <div className="pg-body">
+                  {tasksLoading ? (
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:200,color:'var(--tx2)',fontSize:13}}>Loading tasks...</div>
+                  ) : tasks.length === 0 ? (
+                    <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:200,color:'var(--tx2)',gap:12}}>
+                      <div style={{fontSize:32}}>📋</div>
+                      <div style={{fontSize:13}}>No tasks yet</div>
+                      <button className="btn btn-amb" style={{fontSize:12}} onClick={()=>setShowAddTask(true)}>+ Create your first task</button>
+                    </div>
+                  ) : (
+                    [{title:'TODO',color:'var(--mut)',items:todoTasks},{title:'IN PROGRESS',color:'var(--amb)',items:inProgressTasks},{title:'DONE',color:'var(--grn)',items:doneTasks}].map(col=>(
+                      <div key={col.title} style={{background:'var(--sur)',border:'1px solid var(--bdr)',borderRadius:'var(--r)',padding:14,flex:1,minWidth:220}}>
+                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+                          <span style={{fontSize:11,fontWeight:700,color:col.color,letterSpacing:'.05em'}}>{col.title}</span>
+                          <span style={{fontSize:11,fontWeight:700,background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:100,padding:'2px 8px'}}>{col.items.length}</span>
+                        </div>
+                        {col.items.length === 0 && <div style={{fontSize:12,color:'var(--mut)',textAlign:'center',padding:'20px 0'}}>Empty</div>}
+                        {col.items.map(t=>{
+                          const due = formatDue(t.dueDate)
+                          return (
+                            <div key={t.id} className="task-item" style={{background:'var(--bg)',...(t.status==='COMPLETED'?{opacity:.55}:{})}}>
+                              <div className={`chk${t.status==='COMPLETED'?' done':''}`} onClick={()=>toggleTask(t)}>{t.status==='COMPLETED'?'✓':''}</div>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:13,fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.title}</div>
+                                <div style={{display:'flex',gap:4,marginTop:3,flexWrap:'wrap',alignItems:'center'}}>
+                                  {t.subject && <span style={{fontSize:11,background:'var(--sur2)',border:'1px solid var(--bdr)',borderRadius:4,padding:'1px 6px'}}>{t.subject}</span>}
+                                  <span style={{fontSize:11,fontWeight:700,color:priorityColor(t.priority)}}>{t.priority}</span>
+                                  {due && <span style={{fontSize:11,color:due.urgent?'var(--red)':'var(--mut)'}}>{due.label}</span>}
+                                </div>
+                              </div>
+                              <button onClick={()=>deleteTask(t.id)} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'2px 4px',opacity:.5}} title="Delete">✕</button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
 
               {/* ── TIMER ── */}
+              {/* ── ASK KIRA (AI CHAT) ── */}
+              <div className={`dp${page==='kira'?' active':''}`}>
+                <div className="pg-hdr">
+                  <div className="pg-title">🤖 Ask Kira</div>
+                  <select value={chatSubject} onChange={e=>setChatSubject(e.target.value)}
+                    style={{background:'var(--sur)',border:'1px solid var(--bdr)',borderRadius:8,padding:'7px 12px',color:'var(--tx)',fontSize:13,outline:'none'}}>
+                    <option value="General">General</option>
+                    <option value="Math">Math</option>
+                    <option value="Science">Science</option>
+                    <option value="Programming">Programming</option>
+                    <option value="English">English</option>
+                    <option value="History">History</option>
+                  </select>
+                </div>
+
+                <div style={{display:'flex',flexDirection:'column',height:'calc(100vh - 200px)',background:'var(--sur)',border:'1px solid var(--bdr)',borderRadius:'var(--r)',overflow:'hidden'}}>
+                  {/* Messages area */}
+                  <div style={{flex:1,overflowY:'auto',padding:20,display:'flex',flexDirection:'column',gap:14}}>
+                    {chatMessages.length === 0 ? (
+                      <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',color:'var(--tx2)',gap:14,textAlign:'center'}}>
+                        <div style={{fontSize:48}}>🤖</div>
+                        <div style={{fontSize:18,fontWeight:700,color:'var(--tx)'}}>Hi, I'm Kira!</div>
+                        <div style={{fontSize:13,maxWidth:340}}>Your AI study companion. Ask me anything about your subjects — I'll explain concepts step by step.</div>
+                        <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center',marginTop:8}}>
+                          {['Explain recursion','What is photosynthesis?','Help me understand derivatives'].map(s=>(
+                            <button key={s} onClick={()=>setChatInput(s)}
+                              style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:100,padding:'8px 14px',color:'var(--tx2)',fontSize:12,cursor:'pointer'}}>{s}</button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      chatMessages.map((m,i)=>(
+                        <div key={i} style={{display:'flex',justifyContent:m.role==='user'?'flex-end':'flex-start'}}>
+                          <div style={{
+                            maxWidth:'75%',
+                            background:m.role==='user'?'linear-gradient(135deg,#f59e0b,#d97706)':'var(--bg)',
+                            color:m.role==='user'?'#000':'var(--tx)',
+                            border:m.role==='user'?'none':'1px solid var(--bdr)',
+                            borderRadius:14,
+                            padding:'11px 15px',
+                            fontSize:14,
+                            lineHeight:1.6,
+                            whiteSpace:'pre-wrap',
+                          }}>
+                            {m.role==='assistant' && <div style={{fontSize:11,fontWeight:700,color:'var(--amb)',marginBottom:4}}>🤖 KIRA</div>}
+                            {m.content}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                    {chatLoading && (
+                      <div style={{display:'flex',justifyContent:'flex-start'}}>
+                        <div style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:14,padding:'11px 15px',fontSize:14,color:'var(--tx2)'}}>
+                          <span style={{fontSize:11,fontWeight:700,color:'var(--amb)'}}>🤖 KIRA</span><br/>Thinking...
+                        </div>
+                      </div>
+                    )}
+                    <div ref={chatEndRef}/>
+                  </div>
+
+                  {/* Input area */}
+                  <div style={{borderTop:'1px solid var(--bdr)',padding:14,display:'flex',gap:10,background:'var(--sur)'}}>
+                    <input
+                      value={chatInput}
+                      onChange={e=>setChatInput(e.target.value)}
+                      onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChatMessage()}}}
+                      placeholder="Ask Kira a study question..."
+                      disabled={chatLoading}
+                      style={{flex:1,background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:11,padding:'12px 15px',color:'var(--tx)',fontSize:14,outline:'none'}}
+                    />
+                    <button onClick={sendChatMessage} disabled={chatLoading||!chatInput.trim()}
+                      style={{background:'linear-gradient(135deg,#f59e0b,#d97706)',border:'none',borderRadius:11,padding:'0 20px',color:'#000',fontSize:14,fontWeight:700,cursor:chatLoading?'not-allowed':'pointer',opacity:chatLoading||!chatInput.trim()?.5:1}}>
+                      Send
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div className={`dp${page==='timer'?' active':''}`}>
                 <div className="g2" style={{alignItems:'start'}}>
                   <div className="card" style={{textAlign:'center',padding:'24px 18px'}}>
@@ -597,11 +888,11 @@ export default function DashboardPage() {
                         <div style={{fontSize:10,color:'var(--mut)',textTransform:'uppercase',letterSpacing:'.1em',marginTop:2}}>{timerMode}</div>
                       </div>
                     </div>
-                    <select className="f-select" style={{maxWidth:260,marginBottom:14}}><option>📋 Data Structures</option><option>📐 Calculus PS4</option><option>📖 Essay Draft</option></select>
+                    <input className="f-input" placeholder="What are you studying? (optional)" value={sessionSubject} onChange={e=>setSessionSubject(e.target.value)} style={{maxWidth:260,marginBottom:14,margin:'0 auto 14px',display:'block'}}/>
                     <div style={{display:'flex',gap:8,justifyContent:'center'}}>
-                      <button className="btn btn-ghost" onClick={resetTimer}>↺</button>
+                      <button className="btn btn-ghost" onClick={resetTimer}>↺ Reset</button>
                       <button className="btn btn-amb" style={{padding:'11px 28px',fontSize:15}} onClick={toggleTimer}>{timerRunning?'⏸ Pause':'▶ Start'}</button>
-                      <button className="btn btn-ghost">⏭</button>
+                      <button className="btn btn-ghost" onClick={finishSession}>✓ Finish</button>
                     </div>
                     <div style={{marginTop:12,fontSize:11,color:'var(--mut)'}}>Session 2 of 4 · 🔥 3 done today</div>
                   </div>
@@ -656,42 +947,70 @@ export default function DashboardPage() {
                 <div style={{display:'flex',justifyContent:'flex-end',marginBottom:14}}><button className="btn btn-amb" onClick={()=>setGoalFormOpen(!goalFormOpen)}>+ New Goal</button></div>
                 <div className={`goal-form${goalFormOpen?' open':''}`}>
                   <div style={{fontSize:15,fontWeight:700,marginBottom:14}}>Create New Goal</div>
+                  {goalError && <div style={{background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#fca5a5',marginBottom:12}}>{goalError}</div>}
                   <div className="form-grid">
-                    <div><label className="f-label">Goal Title</label><input className="f-input" placeholder="e.g. Study 20 hours"/></div>
-                    <div><label className="f-label">Type</label><select className="f-select"><option>Weekly</option><option>Daily</option><option>Monthly</option></select></div>
-                    <div><label className="f-label">Target</label><input className="f-input" type="number" placeholder="20"/></div>
-                    <div><label className="f-label">Unit</label><select className="f-select"><option>hours</option><option>tasks</option><option>days</option></select></div>
+                    <div><label className="f-label">Goal Title</label><input className="f-input" placeholder="e.g. Study 20 hours" value={newGoal.title} onChange={e=>setNewGoal(v=>({...v,title:e.target.value}))}/></div>
+                    <div><label className="f-label">Type</label><select className="f-select" value={newGoal.type} onChange={e=>setNewGoal(v=>({...v,type:e.target.value}))}><option value="WEEKLY">Weekly</option><option value="DAILY">Daily</option><option value="MONTHLY">Monthly</option><option value="SEMESTER">Semester</option></select></div>
+                    <div><label className="f-label">Target</label><input className="f-input" type="number" placeholder="20" value={newGoal.targetValue} onChange={e=>setNewGoal(v=>({...v,targetValue:e.target.value}))}/></div>
+                    <div><label className="f-label">Unit</label><select className="f-select" value={newGoal.unit} onChange={e=>setNewGoal(v=>({...v,unit:e.target.value}))}><option value="hours">hours</option><option value="tasks">tasks</option><option value="days">days</option></select></div>
                   </div>
-                  <label className="f-label">Target Date</label><input className="f-input" type="date" style={{marginBottom:12}}/>
-                  <div style={{display:'flex',gap:8}}><button className="btn btn-amb" onClick={()=>{setGoalFormOpen(false);showToast('🎯 Goal created!')}}>Save</button><button className="btn btn-ghost" onClick={()=>setGoalFormOpen(false)}>Cancel</button></div>
+                  <label className="f-label">Target Date</label><input className="f-input" type="date" style={{marginBottom:12}} value={newGoal.targetDate} onChange={e=>setNewGoal(v=>({...v,targetDate:e.target.value}))}/>
+                  <div style={{display:'flex',gap:8}}><button className="btn btn-amb" onClick={createGoal}>Save</button><button className="btn btn-ghost" onClick={()=>{setGoalFormOpen(false);setGoalError('')}}>Cancel</button></div>
                 </div>
                 <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--mut)',marginBottom:10}}>Active Goals</div>
-                {[{em:'📚',t:'Weekly Study: 20 hrs',sub:'Resets Monday · 3 days left',pct:'68%',w:'68%',c:'linear-gradient(90deg,#6366f1,#f59e0b)',val:'13.6/20h'},{em:'✅',t:'Complete 15 Tasks',sub:'Weekly · 3 days left',pct:'53%',w:'53%',c:'var(--grn)',val:'8/15'},{em:'🔥',t:'10-Day Streak',sub:'Ongoing · day 7',pct:'70%',w:'70%',c:'#f97316',val:'7/10d'}].map(g=>(
-                  <div key={g.t} className="goal-card">
-                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:10}}>
-                      <div><div style={{fontSize:14,fontWeight:700}}>{g.em} {g.t}</div><div style={{fontSize:11,color:'var(--mut)'}}>{g.sub}</div></div>
-                      <div style={{fontSize:20,fontWeight:900,fontFamily:"'DM Mono',monospace",color:'var(--amb)'}}>{g.pct}</div>
-                    </div>
-                    <div style={{display:'flex',alignItems:'center',gap:10}}>
-                      <div style={{flex:1,height:7,background:'rgba(255,255,255,.06)',borderRadius:100,overflow:'hidden'}}><div style={{height:'100%',width:g.w,background:g.c,borderRadius:100}}/></div>
-                      <div style={{fontSize:11,color:'var(--mut)',fontFamily:"'DM Mono',monospace",whiteSpace:'nowrap'}}>{g.val}</div>
-                    </div>
+                {goals.length === 0 ? (
+                  <div style={{textAlign:'center',padding:'40px 0',color:'var(--tx2)'}}>
+                    <div style={{fontSize:32,marginBottom:8}}>🎯</div>
+                    <div style={{fontSize:13}}>No goals yet. Create one to start tracking!</div>
                   </div>
-                ))}
+                ) : goals.map(g=>{
+                  const pct = Math.min(100, Math.round((g.currentValue / g.targetValue) * 100))
+                  return (
+                    <div key={g.id} className="goal-card">
+                      <div style={{display:'flex',justifyContent:'space-between',marginBottom:10}}>
+                        <div><div style={{fontSize:14,fontWeight:700}}>🎯 {g.title}</div><div style={{fontSize:11,color:'var(--mut)'}}>{g.type.charAt(0)+g.type.slice(1).toLowerCase()} · Due {new Date(g.targetDate).toLocaleDateString()}</div></div>
+                        <div style={{fontSize:20,fontWeight:900,fontFamily:"'DM Mono',monospace",color:'var(--amb)'}}>{pct}%</div>
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:10}}>
+                        <div style={{flex:1,height:7,background:'rgba(255,255,255,.06)',borderRadius:100,overflow:'hidden'}}><div style={{height:'100%',width:`${pct}%`,background:'linear-gradient(90deg,#6366f1,#f59e0b)',borderRadius:100}}/></div>
+                        <div style={{fontSize:11,color:'var(--mut)',fontFamily:"'DM Mono',monospace",whiteSpace:'nowrap'}}>{g.currentValue}/{g.targetValue}{g.unit==='hours'?'h':''}</div>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
 
               {/* ── ANALYTICS ── */}
               <div className={`dp${page==='analytics'?' active':''}`}>
                 <div className="g4" style={{marginBottom:14}}>
-                  {[{l:'Study',v:'28h',c:'var(--amb)',d:'↑ 15%',cl:'up'},{l:'Done',v:'14',c:'var(--grn)',d:'↑ +2',cl:'up'},{l:'Focus',v:'78',c:'var(--tx)',d:'↓ 3',cl:'dn'},{l:'Sessions',v:'22',c:'var(--tx)',d:'76m avg',cl:''}].map(s=>(
-                    <div key={s.l} className="sc"><div className="sc-l">{s.l}</div><div className="sc-v" style={{color:s.c}}>{s.v}</div><span className={`delta ${s.cl}`}>{s.d}</span></div>
+                  {[
+                    {l:'Study',v:analytics?`${(analytics.study.totalMins7Days/60).toFixed(1)}h`:'0h',c:'var(--amb)',d:'last 7 days'},
+                    {l:'Done',v:analytics?`${analytics.tasks.completed}`:'0',c:'var(--grn)',d:'tasks completed'},
+                    {l:'Focus',v:analytics?`${analytics.study.avgFocusScore}`:'0',c:'var(--tx)',d:'avg score'},
+                    {l:'Sessions',v:analytics?`${analytics.study.sessionCount7Days}`:'0',c:'var(--tx)',d:'this week'},
+                  ].map(s=>(
+                    <div key={s.l} className="sc"><div className="sc-l">{s.l}</div><div className="sc-v" style={{color:s.c}}>{s.v}</div><span className="delta">{s.d}</span></div>
                   ))}
                 </div>
                 <div className="g2" style={{marginBottom:12}}>
-                  <div className="card"><div className="card-t">📊 Daily Hours</div><div className="bar-chart">{[{h:'55%',c:'var(--amb)',l:'M'},{h:'75%',c:'var(--amb)',l:'T'},{h:'40%',c:'var(--amb)',l:'W'},{h:'88%',c:'var(--amb)',l:'T'},{h:'65%',c:'var(--blu)',l:'F'},{h:'30%',c:'rgba(255,255,255,.12)',l:'S'},{h:'15%',c:'rgba(255,255,255,.12)',l:'S'}].map(b=><div key={b.l} className="bw"><div className="bar" style={{height:b.h,background:`linear-gradient(180deg,${b.c},${b.c}aa)`}}/><div className="blbl">{b.l}</div></div>)}</div></div>
-                  <div className="card"><div className="card-t">🎯 Subjects</div>{[{l:'💻 CS',v:'12.5h',w:'80%',c:'var(--amb)'},{l:'📐 Math',v:'8.0h',w:'55%',c:'var(--blu)'},{l:'🔬 Science',v:'4.5h',w:'30%',c:'var(--grn)'},{l:'📖 English',v:'3.0h',w:'20%',c:'var(--pur)'}].map(s=><div key={s.l} style={{marginBottom:9}}><div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:3}}><span>{s.l}</span><span style={{fontFamily:"'DM Mono',monospace"}}>{s.v}</span></div><div className="pt" style={{height:5}}><div className="pf" style={{width:s.w,background:s.c}}/></div></div>)}</div>
+                  <div className="card"><div className="card-t">📊 Daily Hours (last 7 days)</div><div className="bar-chart">{(() => {
+                    const daily = analytics?.dailyData || []
+                    const maxMins = Math.max(60, ...daily.map((d:DailyData)=>d.studyMins))
+                    return daily.map((b:DailyData,i:number)=>{
+                      const pct = Math.round((b.studyMins/maxMins)*100)
+                      const isWeekend = b.label==='Sat'||b.label==='Sun'
+                      return <div key={i} className="bw"><div className="bar" style={{height:`${Math.max(4,pct)}%`,background:`linear-gradient(180deg,${isWeekend?'rgba(255,255,255,.12)':'var(--amb)'},${isWeekend?'rgba(255,255,255,.08)':'var(--amb)'}aa)`}} title={`${(b.studyMins/60).toFixed(1)}h`}/><div className="blbl">{b.label[0]}</div></div>
+                    })
+                  })()}</div></div>
+                  <div className="card"><div className="card-t">🎯 Subjects (last 30 days)</div>{(() => {
+                    const subs = analytics?.subjectBreakdown || []
+                    if (subs.length === 0) return <div style={{fontSize:12,color:'var(--mut)',textAlign:'center',padding:'30px 0'}}>No study sessions yet</div>
+                    const maxMins = Math.max(1, ...subs.map((s:SubjectData)=>s.totalMins))
+                    const colors = ['var(--amb)','var(--blu)','var(--grn)','var(--pur)','#f97316']
+                    return subs.slice(0,5).map((s:SubjectData,i:number)=><div key={i} style={{marginBottom:9}}><div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:3}}><span>{s.subject}</span><span style={{fontFamily:"'DM Mono',monospace"}}>{(s.totalMins/60).toFixed(1)}h</span></div><div className="pt" style={{height:5}}><div className="pf" style={{width:`${Math.round((s.totalMins/maxMins)*100)}%`,background:colors[i%colors.length]}}/></div></div>)
+                  })()}</div>
                 </div>
-                <div className="card"><div className="card-t">🤖 AI History</div><div style={{display:'flex',flexDirection:'column',gap:8}}>{[{t:'🧠 Burnout Detection',time:'Today 9:00',badge:'LOW · 18/100',desc:'Consistent pattern. Keep up the routine.'},{t:'📋 Task Prioritization',time:'Today 8:45',badge:'',desc:'Analyzed 6 tasks. DS → #1 due to tomorrow.'}].map(a=><div key={a.t} style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:10,padding:'11px 13px'}}><div style={{display:'flex',justifyContent:'space-between',marginBottom:5}}><span style={{fontWeight:600,fontSize:13}}>{a.t}</span><span style={{fontSize:11,color:'var(--mut)'}}>{a.time}</span></div>{a.badge&&<span style={{display:'inline-flex',alignItems:'center',gap:4,padding:'3px 10px',borderRadius:100,fontSize:10,fontWeight:700,background:'rgba(16,185,129,.12)',color:'#6ee7b7'}}>{a.badge}</span>}<p style={{fontSize:12,color:'var(--tx2)',marginTop:5}}>{a.desc}</p></div>)}</div></div>
+                <div className="card"><div className="card-t">🤖 AI Features</div><div style={{display:'flex',flexDirection:'column',gap:8}}>{[{t:'📋 Task Prioritization',desc:'AI ranks your tasks by urgency, importance, and effort using Groq Llama 3.3.'},{t:'🤖 Ask Kira (Study Q&A)',desc:'Chat with Kira to get step-by-step explanations for any study topic.'},{t:'🗓 Schedule Optimization',desc:'AI generates an optimized study plan from your tasks and available time.'}].map(a=><div key={a.t} style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:10,padding:'11px 13px'}}><div style={{fontWeight:600,fontSize:13,marginBottom:5}}>{a.t}</div><p style={{fontSize:12,color:'var(--tx2)'}}>{a.desc}</p></div>)}</div></div>
               </div>
 
               {/* ── NOTIFICATIONS ── */}
@@ -700,7 +1019,7 @@ export default function DashboardPage() {
                 <div className="nf-bar">
                   {['All','Unread','🤖 AI','🔔 Reminders','🏆 Wins'].map(f=><button key={f} className={`nf${f==='All'?' active':''}`} onClick={e=>{document.querySelectorAll('.nf').forEach(b=>b.classList.remove('active'));(e.currentTarget as HTMLElement).classList.add('active')}}>{f}</button>)}
                 </div>
-                {[{cls:'ur',ic:'⚠️',ibg:'rgba(239,68,68,.12)',t:'Task Due Tomorrow!',d:'Data Structures due tomorrow 11:59 PM.',time:'5 min ago'},{cls:'ub',ic:'🤖',ibg:'rgba(99,102,241,.12)',t:'AI Analysis Ready',d:'Burnout risk: LOW (18/100). Keep it up!',time:'9:02 AM'},{cls:'ua',ic:'🔥',ibg:'rgba(245,158,11,.12)',t:'7-Day Streak!',d:"You've studied every day this week!",time:'8:00 AM'},{cls:'',ic:'📋',ibg:'rgba(99,102,241,.12)',t:'Tasks Re-prioritized',d:'DS (#1), Calculus (#2), Essay (#3).',time:'8:45 AM',dim:true},{cls:'',ic:'📅',ibg:'rgba(16,185,129,.12)',t:'Session Reminder',d:'Calculus block starts in 15 min.',time:'9:45 AM',dim:true}].map(n=>(
+                {[{cls:'ur',ic:'⚠️',ibg:'rgba(239,68,68,.12)',t:'Task Due Tomorrow!',d:'Data Structures due tomorrow 11:59 PM.',time:'5 min ago'},{cls:'ub',ic:'🤖',ibg:'rgba(99,102,241,.12)',t:'AI Analysis Ready',d:'Kira prioritized your tasks for today.',time:'9:02 AM'},{cls:'ua',ic:'🔥',ibg:'rgba(245,158,11,.12)',t:'7-Day Streak!',d:"You've studied every day this week!",time:'8:00 AM'},{cls:'',ic:'📋',ibg:'rgba(99,102,241,.12)',t:'Tasks Re-prioritized',d:'DS (#1), Calculus (#2), Essay (#3).',time:'8:45 AM',dim:true},{cls:'',ic:'📅',ibg:'rgba(16,185,129,.12)',t:'Session Reminder',d:'Calculus block starts in 15 min.',time:'9:45 AM',dim:true}].map(n=>(
                   <div key={n.t} className={`notif-item${n.cls?' '+n.cls:''}`} style={(n as {dim?:boolean}).dim?{opacity:.65}:{}}>
                     <div className="n-icon" style={{background:n.ibg}}>{n.ic}</div>
                     <div style={{flex:1}}><div className="n-title">{n.t}</div><div className="n-desc">{n.d}</div><div className="n-time">{n.time}</div></div>
@@ -720,9 +1039,9 @@ export default function DashboardPage() {
                     ))}
                   </div>
                   <div>
-                    {settingsTab==='profile'&&<div className="ss active"><div className="ss-title">Profile</div><div className="ss-sub">Manage your information</div><div style={{display:'flex',alignItems:'center',gap:14,marginBottom:18}}><div style={{width:64,height:64,borderRadius:'50%',background:'linear-gradient(135deg,#f59e0b,#d97706)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,fontWeight:800,color:'#000'}}>A</div><div><div style={{fontSize:17,fontWeight:800}}>Aditya Pratama</div><div style={{fontSize:12,color:'var(--mut)'}}>aditya@student.binus.ac.id</div><button className="btn btn-ghost" style={{marginTop:8,fontSize:12,padding:'6px 12px'}}>📷 Photo</button></div></div><div className="s-card">{[{l:'Full Name',v:'Aditya Pratama'},{l:'Email',v:'aditya@student.binus.ac.id'},{l:'Institution',v:'BINUS University'},{l:'Timezone',v:'Asia/Jakarta (UTC+7)'}].map(r=><div key={r.l} className="sr"><div><div className="sr-lbl">{r.l}</div><div className="sr-desc">{r.v}</div></div><button className="btn btn-ghost" style={{fontSize:12,padding:'6px 12px'}}>Edit</button></div>)}</div></div>}
+                    {settingsTab==='profile'&&<div className="ss active"><div className="ss-title">Profile</div><div className="ss-sub">Manage your information</div><div style={{display:'flex',alignItems:'center',gap:14,marginBottom:18}}><div style={{width:64,height:64,borderRadius:'50%',background:'linear-gradient(135deg,#f59e0b,#d97706)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,fontWeight:800,color:'#000'}}>{userName.charAt(0).toUpperCase()}</div><div><div style={{fontSize:17,fontWeight:800}}>{userName}</div><div style={{fontSize:12,color:'var(--mut)'}}>{userEmail||'—'}</div></div></div><div className="s-card">{[{l:'Full Name',v:userName},{l:'Email',v:userEmail||'—'},{l:'Institution',v:'BINUS University'},{l:'Timezone',v:'Asia/Jakarta (UTC+7)'}].map(r=><div key={r.l} className="sr"><div><div className="sr-lbl">{r.l}</div><div className="sr-desc">{r.v}</div></div></div>)}</div></div>}
                     {settingsTab==='prefs'&&<div className="ss active"><div className="ss-title">Preferences</div><div className="ss-sub">Customize your experience</div><div className="s-card"><div className="sr"><div><div className="sr-lbl">Daily Goal</div><div className="sr-desc">Target hours/day</div></div><select className="f-select" style={{width:110}}><option>2h</option><option selected>4h</option><option>6h</option><option>8h</option></select></div><div className="sr"><div><div className="sr-lbl">Accent Color</div><div className="sr-desc">Dashboard theme</div></div><div style={{display:'flex',gap:7}}>{['#f59e0b','#6366f1','#10b981','#ef4444','#8b5cf6'].map((c,i)=><div key={c} className={`swatch${i===0?' sel':''}`} style={{background:c}} onClick={e=>{document.querySelectorAll('.swatch').forEach(s=>s.classList.remove('sel'));(e.currentTarget as HTMLElement).classList.add('sel');showToast('🎨 Theme updated!')}}/>)}</div></div></div></div>}
-                    {settingsTab==='notif'&&<div className="ss active"><div className="ss-title">Notifications</div><div className="ss-sub">What you get notified about</div><div className="s-card">{[{l:'Task Reminders',d:'Before deadlines',on:true},{l:'AI Insights',d:'Burnout & priority',on:true},{l:'Session Prompts',d:'Study reminders',on:true},{l:'Achievements',d:'Streaks & goals',on:false}].map(r=><div key={r.l} className="sr"><div><div className="sr-lbl">{r.l}</div><div className="sr-desc">{r.d}</div></div><label className="toggle"><input type="checkbox" defaultChecked={r.on}/><span className="tslider"/></label></div>)}</div></div>}
+                    {settingsTab==='notif'&&<div className="ss active"><div className="ss-title">Notifications</div><div className="ss-sub">What you get notified about</div><div className="s-card">{[{l:'Task Reminders',d:'Before deadlines',on:true},{l:'AI Insights',d:'Task priority & tips',on:true},{l:'Session Prompts',d:'Study reminders',on:true},{l:'Achievements',d:'Streaks & goals',on:false}].map(r=><div key={r.l} className="sr"><div><div className="sr-lbl">{r.l}</div><div className="sr-desc">{r.d}</div></div><label className="toggle"><input type="checkbox" defaultChecked={r.on}/><span className="tslider"/></label></div>)}</div></div>}
                     {settingsTab==='security'&&<div className="ss active"><div className="ss-title">Security</div><div className="ss-sub">Account security settings</div><div className="s-card"><div className="sr"><div><div className="sr-lbl">Password</div><div className="sr-desc">Changed 30 days ago</div></div><button className="btn btn-ghost" style={{fontSize:12,padding:'6px 12px'}}>Change</button></div><div className="sr"><div><div className="sr-lbl">Two-Factor Auth</div><div className="sr-desc">Extra security</div></div><label className="toggle"><input type="checkbox"/><span className="tslider"/></label></div><div className="sr"><div><div className="sr-lbl">Active Sessions</div><div className="sr-desc">1 device signed in</div></div><button className="btn btn-ghost" style={{fontSize:12,padding:'6px 12px'}}>View</button></div></div></div>}
                     {settingsTab==='danger'&&<div className="ss active"><div className="ss-title" style={{color:'var(--red)'}}>Danger Zone</div><div className="ss-sub">Irreversible — proceed carefully</div><div className="danger-box"><div style={{fontSize:13,fontWeight:700,color:'var(--red)',marginBottom:12}}>⚠️ Irreversible Actions</div><div style={{display:'flex',flexDirection:'column',gap:10}}>{[{t:'Clear All Data',d:'Delete sessions, tasks & analytics'},{t:'Delete Account',d:'Permanently remove all data'}].map(a=><div key={a.t} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:12,background:'rgba(239,68,68,.05)',border:'1px solid rgba(239,68,68,.15)',borderRadius:10,gap:12}}><div><div style={{fontSize:13,fontWeight:600}}>{a.t}</div><div style={{fontSize:12,color:'var(--mut)'}}>{a.d}</div></div><button className="btn btn-red" style={{fontSize:12}} onClick={()=>a.t.includes('Account')?router.push('/'):showToast('⚠️ This cannot be undone!')}>Delete</button></div>)}</div></div></div>}
                   </div>

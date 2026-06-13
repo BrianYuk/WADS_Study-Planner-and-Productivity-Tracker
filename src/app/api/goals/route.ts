@@ -4,6 +4,8 @@ import { prisma } from '@/lib/db'
 import { withAuth } from '@/middleware/apiMiddleware'
 import type { JWTPayload } from '@/lib/auth'
 
+export const dynamic = 'force-dynamic'
+
 const goalSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(500).optional(),

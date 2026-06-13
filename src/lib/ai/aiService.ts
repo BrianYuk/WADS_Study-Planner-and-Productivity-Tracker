@@ -1,15 +1,13 @@
 import Groq from 'groq-sdk'
 import { prisma } from '@/lib/db'
 
-// ── Lazy Groq client ──────────────────────────────────────────────────────────
-// Created on first use to prevent build-time crash when API key is absent
+// Lazy Groq client — created on first use to prevent build-time crash when key absent
 function getGroq() {
   return new Groq({ apiKey: process.env.GROQ_API_KEY || 'placeholder' })
 }
 
-const MODEL = 'llama-3.3-70b-versatile' // Free Groq model
+const MODEL = 'llama-3.3-70b-versatile'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
 export interface TaskForPrioritization {
   id: string
   title: string
@@ -22,7 +20,7 @@ export interface TaskForPrioritization {
 
 export interface PrioritizationResult {
   taskId: string
-  aiScore: number       // 0-1, higher = more urgent
+  aiScore: number
   reasoning: string
   suggestedOrder: number
 }
@@ -45,8 +43,7 @@ export interface ScheduleRequest {
   preferences: { maxDailyHours: number; preferredSubjects?: string[] }
 }
 
-// ── AI FEATURE 1: Smart Task Prioritization ───────────────────────────────────
-// Analyzes student tasks and returns AI-scored prioritization
+// ── AI FEATURE 1: Smart Task Prioritization ──────────────────────────
 export async function prioritizeTasks(
   userId: string,
   tasks: TaskForPrioritization[]
@@ -58,19 +55,10 @@ export async function prioritizeTasks(
 Tasks:
 ${JSON.stringify(tasks, null, 2)}
 
-For each task, evaluate:
-1. Urgency (due date proximity)
-2. Importance (subject weight, priority label)
-3. Estimated effort
-4. Current status
+For each task, evaluate urgency (due date), importance (subject, priority), effort, and status.
 
-Return ONLY a valid JSON array (no markdown, no explanation) with this exact structure:
-[{
-  "taskId": "string",
-  "aiScore": 0.85,
-  "reasoning": "Due tomorrow, high priority subject",
-  "suggestedOrder": 1
-}]
+Return ONLY a valid JSON array (no markdown):
+[{"taskId": "string", "aiScore": 0.85, "reasoning": "Due tomorrow, high priority", "suggestedOrder": 1}]
 
 Sort by aiScore descending. aiScore is 0-1 where 1 = most urgent.`
 
@@ -111,28 +99,22 @@ Sort by aiScore descending. aiScore is 0-1 where 1 = most urgent.`
   }
 }
 
-// ── AI FEATURE 2: Study Q&A Chat ──────────────────────────────────────────────
-// Kira answers study questions with step-by-step explanations
+// ── AI FEATURE 2: Study Q&A Chat ─────────────────────────────────────
 export async function answerStudyQuestion(
   userId: string,
   question: string,
   subject: string,
   history: ChatMessage[] = []
 ): Promise<StudyQAResult> {
-  const systemPrompt = `You are Kira, a friendly and knowledgeable AI study companion for university students. 
-Your role is to help students understand difficult concepts, solve problems, and improve their study skills.
-
-Guidelines:
-- Give clear, step-by-step explanations
-- Use examples relevant to the student's level
-- Be encouraging and supportive
-- If asked about ${subject}, focus on that subject context
-- Keep answers concise but complete (200-400 words max)
-- Never do homework for students — guide them to understand instead`
+  const systemPrompt = `You are Kira, a friendly AI study companion for university students.
+Help students understand difficult concepts with clear, step-by-step explanations.
+Guidelines: be encouraging, use relevant examples, keep answers concise (200-400 words),
+and guide students to understand rather than doing their homework for them.
+Focus on the subject: ${subject}.`
 
   const messages = [
     { role: 'system' as const, content: systemPrompt },
-    ...history.slice(-6), // Keep last 6 messages for context
+    ...history.slice(-6),
     { role: 'user' as const, content: question },
   ]
 
@@ -173,33 +155,19 @@ Guidelines:
   }
 }
 
-// ── AI FEATURE 3: Study Schedule Optimization ─────────────────────────────────
-// Creates an optimized study schedule using AI
+// ── AI FEATURE 3: Study Schedule Optimization ────────────────────────
 export async function optimizeSchedule(
   userId: string,
   request: ScheduleRequest
 ): Promise<{ schedule: object[]; explanation: string }> {
-  const prompt = `Create an optimized study schedule for a student.
+  const prompt = `Create an optimized study schedule.
 
-Tasks to schedule:
-${JSON.stringify(request.tasks, null, 2)}
+Tasks: ${JSON.stringify(request.tasks, null, 2)}
+Available slots: ${JSON.stringify(request.availableSlots, null, 2)}
+Max daily hours: ${request.preferences.maxDailyHours}
 
-Available time slots:
-${JSON.stringify(request.availableSlots, null, 2)}
-
-Preferences:
-- Max daily study hours: ${request.preferences.maxDailyHours}
-- Preferred subjects first: ${request.preferences.preferredSubjects?.join(', ') || 'none'}
-
-Apply spaced repetition, cognitive load balancing, and Pomodoro principles.
-
-Return ONLY valid JSON (no markdown):
-{
-  "schedule": [
-    {"taskId": "...", "day": "Monday", "startHour": 9, "endHour": 10, "technique": "Pomodoro"}
-  ],
-  "explanation": "Brief explanation of the schedule rationale"
-}`
+Apply spaced repetition and Pomodoro principles. Return ONLY valid JSON:
+{"schedule": [{"taskId": "...", "day": "Monday", "startHour": 9, "endHour": 10, "technique": "Pomodoro"}], "explanation": "..."}`
 
   try {
     const response = await getGroq().chat.completions.create({

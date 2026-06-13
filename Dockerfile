@@ -33,6 +33,10 @@ RUN npx prisma generate
 # Build Next.js with standalone output — produces a minimal self-contained bundle
 # Requires output: "standalone" in next.config.js
 ENV NEXT_TELEMETRY_DISABLED=1
+# Placeholder DATABASE_URL so the PrismaClient constructor is satisfied during the
+# build's "Collecting page data" step. No real DB connection is made at build time;
+# the real DATABASE_URL is injected at runtime via the container environment.
+ENV DATABASE_URL="postgresql://build:build@localhost:5432/build?schema=public"
 RUN npm run build
 
 # ── Stage 4: Production Runner ────────────────────────────────────────────────
