@@ -40,7 +40,7 @@ export default function RegisterPage() {
 
   return (
     <>
-      <style>{`
+      <style dangerouslySetInnerHTML={{__html: `
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&display=swap');
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
         body{background:#090b12;color:#f1f5f9;font-family:'DM Sans',sans-serif;-webkit-tap-highlight-color:transparent;}
@@ -85,7 +85,7 @@ export default function RegisterPage() {
         .spin{width:16px;height:16px;border:2px solid rgba(0,0,0,.3);border-top-color:#000;border-radius:50%;animation:spin .7s linear infinite;}
         @keyframes spin{to{transform:rotate(360deg);}}
         @media(max-width:540px){.page{padding:60px 16px 24px;}.card{padding:24px 18px;border-radius:18px;}.row2{grid-template-columns:1fr;}}
-      `}</style>
+      `}} />
       <div className="blob blob1"/><div className="blob blob2"/><div className="bg-grid"/>
       <div style={{position:'fixed',top:16,left:16,zIndex:100}}>
         <Link href="/login" style={{display:'flex',alignItems:'center',gap:8,background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.1)',borderRadius:9,padding:'7px 13px',fontSize:13,fontWeight:600,color:'#94a3b8',textDecoration:'none'}}>← Sign in</Link>

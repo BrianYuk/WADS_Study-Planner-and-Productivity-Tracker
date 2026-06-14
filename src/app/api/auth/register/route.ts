@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { hashPassword, signAccessToken, signRefreshToken, isValidPassword } from '@/lib/auth'
+import { hashPassword, issueSession, isValidPassword } from '@/lib/auth'
 import { checkRateLimit, sanitizeInput } from '@/middleware/apiMiddleware'
 
 const registerSchema = z.object({
@@ -53,32 +53,9 @@ export async function POST(req: NextRequest) {
       select: { id: true, name: true, email: true, role: true },
     })
 
-    const accessToken = signAccessToken({ sub: user.id, email: user.email, role: user.role })
-    const refreshToken = signRefreshToken(user.id)
-
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        token: refreshToken,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    })
-
     const res = NextResponse.json({ user, message: 'Registration successful' }, { status: 201 })
-    res.cookies.set('access_token', accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 15 * 60,
-      path: '/',
-    })
-    res.cookies.set('refresh_token', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60,
-      path: '/api/auth',
-    })
+
+    await issueSession(res, user)
 
     return res
   } catch (err) {

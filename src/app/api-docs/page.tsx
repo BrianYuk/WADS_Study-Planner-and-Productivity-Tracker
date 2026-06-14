@@ -12,7 +12,7 @@ export default function ApiDocsPage() {
 
   return (
     <>
-      <style>{`
+      <style dangerouslySetInnerHTML={{__html: `
         /* ── Page shell ── */
         body { margin: 0; background: #0f1117; font-family: 'Inter', sans-serif; }
 
@@ -93,7 +93,7 @@ export default function ApiDocsPage() {
         .swagger-ui .model-title { color: #f1f5f9 !important; }
 
         .swagger-ui .topbar { display: none !important; }
-      `}</style>
+      `}} />
 
       <div className="kf-header">
         <Logo iconSize={34} />

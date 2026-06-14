@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { comparePassword, signAccessToken, signRefreshToken } from '@/lib/auth'
+import { comparePassword, issueSession } from '@/lib/auth'
 import { checkRateLimit } from '@/middleware/apiMiddleware'
 
 const loginSchema = z.object({
@@ -41,39 +41,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 })
     }
 
-    const accessToken = signAccessToken({ sub: user.id, email: user.email, role: user.role })
-    const refreshToken = signRefreshToken(user.id)
-
-    // Store refresh token
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        token: refreshToken,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    })
-
     const res = NextResponse.json({
       user: { id: user.id, name: user.name, email: user.email, role: user.role },
       message: 'Login successful',
     })
 
-    const isProd = process.env.NODE_ENV === 'production'
-
-    res.cookies.set('access_token', accessToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: 'strict',
-      maxAge: 15 * 60,
-      path: '/',
-    })
-    res.cookies.set('refresh_token', refreshToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60,
-      path: '/api/auth',
-    })
+    await issueSession(res, user)
 
     return res
   } catch (err) {

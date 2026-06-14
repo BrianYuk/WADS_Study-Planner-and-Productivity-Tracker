@@ -106,7 +106,8 @@ export default function DashboardPage() {
   const [todayTotalMins, setTodayTotalMins] = useState(0)
   const [sessionsLoading, setSessionsLoading] = useState(false)
   // Calendar
-  const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); d.setDate(1); return d })
+  const [calendarView, setCalendarView] = useState<'month'|'week'|'year'>('month')
+  const [calendarDate, setCalendarDate] = useState(() => { const d = new Date(); d.setHours(0,0,0,0); return d })
 
   const titles: Record<Page,string> = {dashboard:'Dashboard',tasks:'Tasks',kira:'Ask Kira',timer:'Study Timer',calendar:'Calendar',goals:'Goals',analytics:'Analytics',notifications:'Notifications',settings:'Settings'}
   const mainNav: {id:Page,icon:string,label:string,badge?:string}[] = [
@@ -487,16 +488,60 @@ export default function DashboardPage() {
   }
 
   // ── Calendar ──────────────────────────────────────────────────
-  function prevMonth() { setCalendarMonth(d => { const nd = new Date(d); nd.setMonth(nd.getMonth()-1); return nd }) }
-  function nextMonth() { setCalendarMonth(d => { const nd = new Date(d); nd.setMonth(nd.getMonth()+1); return nd }) }
+  function calPrev() {
+    setCalendarDate(d => {
+      const nd = new Date(d)
+      if (calendarView === 'week') nd.setDate(nd.getDate() - 7)
+      else if (calendarView === 'year') nd.setFullYear(nd.getFullYear() - 1)
+      else nd.setMonth(nd.getMonth() - 1)
+      return nd
+    })
+  }
+  function calNext() {
+    setCalendarDate(d => {
+      const nd = new Date(d)
+      if (calendarView === 'week') nd.setDate(nd.getDate() + 7)
+      else if (calendarView === 'year') nd.setFullYear(nd.getFullYear() + 1)
+      else nd.setMonth(nd.getMonth() + 1)
+      return nd
+    })
+  }
 
   const calendarDays = (() => {
-    const year = calendarMonth.getFullYear()
-    const month = calendarMonth.getMonth()
+    const year = calendarDate.getFullYear()
+    const month = calendarDate.getMonth()
     const startOffset = (new Date(year, month, 1).getDay() + 6) % 7
     const daysInMonth = new Date(year, month + 1, 0).getDate()
     const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7
     return Array.from({ length: totalCells }, (_, i) => new Date(year, month, 1 - startOffset + i))
+  })()
+
+  const weekDays = (() => {
+    const offset = (calendarDate.getDay() + 6) % 7
+    return Array.from({ length: 7 }, (_, i) => { const d = new Date(calendarDate); d.setDate(calendarDate.getDate() - offset + i); return d })
+  })()
+
+  const yearMonths = (() => {
+    const year = calendarDate.getFullYear()
+    return Array.from({ length: 12 }, (_, m) => {
+      const startOffset = (new Date(year, m, 1).getDay() + 6) % 7
+      const daysInMonth = new Date(year, m + 1, 0).getDate()
+      const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7
+      const days = Array.from({ length: totalCells }, (_, i) => new Date(year, m, 1 - startOffset + i))
+      return { month: m, days }
+    })
+  })()
+
+  const calendarLabel = (() => {
+    if (calendarView === 'year') return `${calendarDate.getFullYear()}`
+    if (calendarView === 'week') {
+      const start = weekDays[0], end = weekDays[6]
+      const sameMonth = start.getMonth() === end.getMonth()
+      const startStr = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      const endStr = end.toLocaleDateString('en-US', sameMonth ? { day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' })
+      return `${startStr} – ${endStr}`
+    }
+    return calendarDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
   })()
 
   const calEvents: Record<string,{t:string,c:string}[]> = {}
@@ -521,7 +566,7 @@ export default function DashboardPage() {
 
   return (
     <>
-      <style>{`
+      <style dangerouslySetInnerHTML={{__html: `
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&family=DM+Mono:wght@400;500&display=swap');
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
         :root{--bg:#090b12;--sur:#111420;--sur2:#161927;--bdr:rgba(255,255,255,.08);--bdr2:rgba(255,255,255,.12);--amb:#f59e0b;--adim:rgba(245,158,11,.12);--grn:#10b981;--red:#ef4444;--blu:#6366f1;--pur:#8b5cf6;--tx:#f1f5f9;--tx2:#94a3b8;--mut:#475569;--r:14px;--sb:228px;--tb:56px;--bn:60px;}
@@ -717,7 +762,7 @@ export default function DashboardPage() {
         *{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.1) transparent;}
         *::-webkit-scrollbar{width:3px;}
         *::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:100px;}
-      `}</style>
+      `}} />
 
       {/* Overlays */}
       <div className={`overlay${sidebarOpen?' show':''}`} onClick={()=>setSidebarOpen(false)}/>
@@ -1080,28 +1125,86 @@ export default function DashboardPage() {
               {/* ── CALENDAR ── */}
               <div className={`dp${page==='calendar'?' active':''}`}>
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14,gap:8,flexWrap:'wrap'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:10}}><button className="btn btn-ghost" style={{padding:'7px 12px'}} onClick={prevMonth}>←</button><div style={{fontSize:15,fontWeight:800}}>{calendarMonth.toLocaleDateString('en-US',{month:'long',year:'numeric'})}</div><button className="btn btn-ghost" style={{padding:'7px 12px'}} onClick={nextMonth}>→</button></div>
+                  <div style={{display:'flex',alignItems:'center',gap:10}}><button className="btn btn-ghost" style={{padding:'7px 12px'}} onClick={calPrev}>←</button><div style={{fontSize:15,fontWeight:800,width:190,textAlign:'center',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{calendarLabel}</div><button className="btn btn-ghost" style={{padding:'7px 12px'}} onClick={calNext}>→</button></div>
                   <div style={{display:'flex',gap:8}}><button className="btn btn-ai" style={{fontSize:12}} onClick={()=>showToast('🤖 Generating schedule...')}>🤖 AI Plan</button><button className="btn btn-amb" style={{fontSize:12}}>+ Event</button></div>
                 </div>
-                <div className="card" style={{padding:0,overflow:'hidden'}}>
-                  <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',borderBottom:'1px solid var(--bdr)'}}>
-                    {['M','T','W','T','F','S','S'].map((d,i)=><div key={i} style={{padding:'10px 4px',textAlign:'center',fontSize:10,fontWeight:700,color:'var(--mut)'}}>{d}</div>)}
+                <div className="nf-bar">
+                  {(['month','week','year'] as const).map(v=><button key={v} className={`nf${calendarView===v?' active':''}`} onClick={()=>setCalendarView(v)}>{v==='month'?'Month':v==='week'?'Week':'Year'}</button>)}
+                </div>
+
+                {calendarView==='month' && (
+                  <div className="card" style={{padding:0,overflow:'hidden'}}>
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',borderBottom:'1px solid var(--bdr)'}}>
+                      {['M','T','W','T','F','S','S'].map((d,i)=><div key={i} style={{padding:'10px 4px',textAlign:'center',fontSize:10,fontWeight:700,color:'var(--mut)'}}>{d}</div>)}
+                    </div>
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)'}}>
+                      {calendarDays.map((date,i)=>{
+                        const isToday = date.toDateString() === new Date().toDateString()
+                        const inMonth = date.getMonth() === calendarDate.getMonth()
+                        const events = calEvents[date.toDateString()] || []
+                        return (
+                          <div key={i} style={{minHeight:80,padding:'8px 6px',borderRight:'1px solid rgba(255,255,255,.05)',borderBottom:'1px solid rgba(255,255,255,.05)',background:isToday?'rgba(245,158,11,.05)':'',opacity:inMonth?1:0.35}}>
+                            <div style={{fontSize:12,fontWeight:isToday?800:600,color:isToday?'var(--amb)':'var(--tx)',marginBottom:4}}>{date.getDate()}</div>
+                            {events.slice(0,3).map((ev,j)=><div key={j} style={{background:`${ev.c}22`,borderLeft:`2px solid ${ev.c}`,borderRadius:3,padding:'2px 4px',fontSize:9,marginBottom:2,color:ev.c,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ev.t}</div>)}
+                            {events.length>3 && <div style={{fontSize:9,color:'var(--mut)',marginTop:2}}>+{events.length-3} more</div>}
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
-                  <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)'}}>
-                    {calendarDays.map((date,i)=>{
-                      const isToday = date.toDateString() === new Date().toDateString()
-                      const inMonth = date.getMonth() === calendarMonth.getMonth()
-                      const events = calEvents[date.toDateString()] || []
+                )}
+
+                {calendarView==='week' && (
+                  <div className="card" style={{padding:0,overflow:'hidden'}}>
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',borderBottom:'1px solid var(--bdr)'}}>
+                      {weekDays.map((date,i)=>{
+                        const isToday = date.toDateString() === new Date().toDateString()
+                        return (
+                          <div key={i} style={{padding:'10px 4px',textAlign:'center',borderRight:i<6?'1px solid rgba(255,255,255,.05)':'none'}}>
+                            <div style={{fontSize:10,fontWeight:700,color:'var(--mut)',marginBottom:2}}>{date.toLocaleDateString('en-US',{weekday:'short'})}</div>
+                            <div style={{fontSize:13,fontWeight:800,color:isToday?'var(--amb)':'var(--tx)'}}>{date.getDate()}</div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',minHeight:280}}>
+                      {weekDays.map((date,i)=>{
+                        const events = calEvents[date.toDateString()] || []
+                        return (
+                          <div key={i} style={{padding:'8px 6px',borderRight:i<6?'1px solid rgba(255,255,255,.05)':'none'}}>
+                            {events.map((ev,j)=><div key={j} style={{background:`${ev.c}22`,borderLeft:`2px solid ${ev.c}`,borderRadius:3,padding:'4px 6px',fontSize:11,marginBottom:4,color:ev.c,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ev.t}</div>)}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {calendarView==='year' && (
+                  <div className="g4">
+                    {yearMonths.map(({month,days})=>{
+                      const monthName = new Date(calendarDate.getFullYear(),month,1).toLocaleDateString('en-US',{month:'short'})
                       return (
-                        <div key={i} style={{minHeight:80,padding:'8px 6px',borderRight:'1px solid rgba(255,255,255,.05)',borderBottom:'1px solid rgba(255,255,255,.05)',background:isToday?'rgba(245,158,11,.05)':'',opacity:inMonth?1:0.35}}>
-                          <div style={{fontSize:12,fontWeight:isToday?800:600,color:isToday?'var(--amb)':'var(--tx)',marginBottom:4}}>{date.getDate()}</div>
-                          {events.slice(0,3).map((ev,j)=><div key={j} style={{background:`${ev.c}22`,borderLeft:`2px solid ${ev.c}`,borderRadius:3,padding:'2px 4px',fontSize:9,marginBottom:2,color:ev.c,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ev.t}</div>)}
-                          {events.length>3 && <div style={{fontSize:9,color:'var(--mut)',marginTop:2}}>+{events.length-3} more</div>}
+                        <div key={month} className="card" style={{padding:10}}>
+                          <div style={{fontSize:12,fontWeight:800,marginBottom:8,textAlign:'center'}}>{monthName}</div>
+                          <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:2}}>
+                            {days.map((date,i)=>{
+                              const inMonth = date.getMonth()===month
+                              const isToday = date.toDateString()===new Date().toDateString()
+                              const hasEvents = (calEvents[date.toDateString()]||[]).length>0
+                              return (
+                                <div key={i} style={{aspectRatio:'1',display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,borderRadius:4,opacity:inMonth?1:0.25,background:isToday?'rgba(245,158,11,.15)':'',color:isToday?'var(--amb)':'var(--tx2)',fontWeight:isToday?800:500,position:'relative'}}>
+                                  {date.getDate()}
+                                  {hasEvents && inMonth && <div style={{position:'absolute',bottom:1,width:3,height:3,borderRadius:'50%',background:'var(--amb)'}}/>}
+                                </div>
+                              )
+                            })}
+                          </div>
                         </div>
                       )
                     })}
                   </div>
-                </div>
+                )}
               </div>
 
               {/* ── GOALS ── */}

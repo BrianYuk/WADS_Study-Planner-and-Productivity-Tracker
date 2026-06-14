@@ -5,7 +5,7 @@ import Logo from '@/components/Logo'
 export default function LandingPage() {
   return (
     <>
-      <style>{`
+      <style dangerouslySetInnerHTML={{__html: `
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&family=DM+Mono:wght@400;500&display=swap');
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
         body{background:#090b12;color:#f1f5f9;font-family:'DM Sans',sans-serif;-webkit-tap-highlight-color:transparent;overflow-x:hidden;}
@@ -68,7 +68,7 @@ export default function LandingPage() {
         footer span{font-size:12px;color:#2d3748;}
         @media(max-width:900px){nav{padding:0 20px;}.hero{padding:80px 20px 60px;}.feats{padding:60px 20px;}.feats-grid{grid-template-columns:1fr 1fr;}.ai-sect{padding:60px 20px;}.ai-inner{grid-template-columns:1fr;}.ai-preview{display:none;}footer{padding:20px;flex-direction:column;gap:6px;align-items:center;}}
         @media(max-width:600px){nav{padding:0 16px;height:58px;}.hero{padding:70px 16px 48px;}.hero-p{font-size:15px;}.hero-btns{flex-direction:column;align-items:center;}.btn-cta,.btn-outline{width:100%;max-width:300px;}.feats{padding:48px 16px;}.feats-grid{grid-template-columns:1fr;}.land-cta{padding:60px 16px;}}
-      `}</style>
+      `}} />
       <div className="blob blob1"/><div className="blob blob2"/><div className="bg-grid"/>
       <nav>
         <Logo iconSize={24} />
