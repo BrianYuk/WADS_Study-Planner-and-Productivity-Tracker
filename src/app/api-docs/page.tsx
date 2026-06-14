@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import SwaggerUI from 'swagger-ui-react'
 import 'swagger-ui-react/swagger-ui.css'
 import { swaggerSpec } from '@/lib/swagger'
+import Logo from '@/components/Logo'
 
 export default function ApiDocsPage() {
   const [mounted, setMounted] = useState(false)
@@ -24,15 +25,6 @@ export default function ApiDocsPage() {
           border-bottom: 1px solid rgba(255,255,255,.08);
           position: sticky; top: 0; z-index: 100;
         }
-        .kf-logo-icon {
-          width: 34px; height: 34px;
-          background: linear-gradient(135deg,#f59e0b,#d97706);
-          border-radius: 8px;
-          display: flex; align-items: center; justify-content: center;
-          font-size: 16px;
-        }
-        .kf-logo-text { font-size: 16px; font-weight: 800; color: #f1f5f9; }
-        .kf-logo-text span { color: #f59e0b; }
         .kf-badge {
           margin-left: 4px;
           background: rgba(245,158,11,.15); border: 1px solid rgba(245,158,11,.3);
@@ -104,8 +96,7 @@ export default function ApiDocsPage() {
       `}</style>
 
       <div className="kf-header">
-        <div className="kf-logo-icon">⚡</div>
-        <div className="kf-logo-text">Kira<span>Flow</span></div>
+        <Logo iconSize={34} />
         <span className="kf-badge">1.0.0</span>
         <span className="kf-oas-badge">OAS 3.0</span>
         <span className="kf-desc">API documentation for Kira Flow — AI-Powered Study Companion</span>

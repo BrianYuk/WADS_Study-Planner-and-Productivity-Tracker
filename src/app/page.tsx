@@ -1,5 +1,5 @@
-import { p } from 'framer-motion/client';
 import Link from 'next/link'
+import Logo from '@/components/Logo'
 
 
 export default function LandingPage() {
@@ -14,12 +14,6 @@ export default function LandingPage() {
         .blob2{width:500px;height:500px;background:#6366f1;bottom:-150px;right:-150px;}
         .bg-grid{position:fixed;inset:0;background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
         nav{position:sticky;top:0;z-index:50;display:flex;align-items:center;justify-content:space-between;padding:0 60px;height:66px;background:rgba(9,11,18,.88);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.08);}
-        .nav-logo{display:flex;align-items:center;gap:10px;text-decoration:none;}
-        
-        .logo-icon{display:flex;align-items:center;justify-content:center;}
-        .logo-icon img{height:1.5rem;width:auto;object-fit:contain;display:block;}
-        .logo-text{font-size:16px;font-weight:800;color:#f1f5f9;}
-        .logo-text span{color:#f59e0b;}
         .nav-links{display:flex;gap:8px;}
         .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 16px;border-radius:9px;font-size:13px;font-weight:600;text-decoration:none;transition:all .18s;white-space:nowrap;}
         .btn-ghost{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);color:#94a3b8;}
@@ -77,16 +71,7 @@ export default function LandingPage() {
       `}</style>
       <div className="blob blob1"/><div className="blob blob2"/><div className="bg-grid"/>
       <nav>
-        <Link href="/" className="nav-logo">
-          <div className="logo-icon">
-            <div>
-              <img src="kiraFlowLogo.png"></img>
-            </div>
-          </div>
-            <div className="logo-text">
-              Kira<span>Flow</span>
-          </div>
-          </Link>
+        <Logo iconSize={24} />
         <div className="nav-links">
           <Link href="/login" className="btn btn-ghost">Sign In</Link>
           <Link href="/register" className="btn btn-amber">Get Started →</Link>
@@ -106,7 +91,7 @@ export default function LandingPage() {
           <div><div className="stat-n">24<span>/7</span></div><div className="stat-l">Available</div></div>
         </div>
       </div>
-      <div className="divider-logo"><img src="kiraFlowLogo.png" alt="kira logo" /></div>
+      <div className="divider-logo"><img src="/KiraFlowLogo.png" alt="Kira Flow logo" /></div>
       <div className="feats">
         <div className="feats-title">Built for academic success</div>
         <div className="feats-grid">
@@ -140,7 +125,6 @@ export default function LandingPage() {
         <Link href="/register" className="btn btn-cta" style={{display:'inline-flex'}}>Create free account →</Link>
       </div>
       <footer><span>© 2026 Kira Flow · BINUS University International · COMP6703001</span><span>Built with Next.js · PostgreSQL · OpenAI</span></footer>
-      <p className="text-9xl">jesus</p>
     </>
   )
 }

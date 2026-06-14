@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import Logo from '@/components/Logo'
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -49,10 +50,6 @@ export default function RegisterPage() {
         .bg-grid{position:fixed;inset:0;background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
         .page{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:80px 20px 40px;position:relative;z-index:1;}
         .card{width:100%;max-width:490px;background:rgba(13,16,26,.92);border:1px solid rgba(255,255,255,.1);border-radius:22px;padding:36px 32px;backdrop-filter:blur(20px);box-shadow:0 40px 100px rgba(0,0,0,.7);}
-        .logo{display:flex;align-items:center;gap:10px;text-decoration:none;margin-bottom:20px;}
-        .logo-icon{width:32px;height:32px;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;}
-        .logo-text{font-size:14px;font-weight:800;color:#f1f5f9;}
-        .logo-text span{color:#f59e0b;}
         .title{font-size:22px;font-weight:800;letter-spacing:-0.02em;margin-bottom:4px;}
         .sub{font-size:13px;color:#64748b;margin-bottom:22px;}
         .sub a{color:#f59e0b;font-weight:600;text-decoration:none;}
@@ -95,7 +92,7 @@ export default function RegisterPage() {
       </div>
       <div className="page">
         <div className="card">
-          <Link href="/" className="logo"><div className="logo-icon">⚡</div><div className="logo-text">Kira<span>Flow</span></div></Link>
+          <Logo className="mb-5" iconSize={32} textClassName="text-sm" />
           <div className="title">Create your account</div>
           <div className="sub">Already have one? <Link href="/login">Sign in</Link></div>
           {error && <div className="err"><span>⚠️</span><span>{error}</span></div>}

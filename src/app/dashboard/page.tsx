@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import Logo from '@/components/Logo'
 
 
 type Task = {
@@ -16,6 +17,35 @@ type Task = {
   tags: string[]
 }
 
+type Notification = {
+  id: string
+  title: string
+  message: string
+  type: 'REMINDER' | 'ACHIEVEMENT' | 'AI_INSIGHT' | 'SYSTEM'
+  isRead: boolean
+  sentAt: string
+}
+
+const notifMeta: Record<string,{ic:string,ibg:string,cls:string}> = {
+  REMINDER: {ic:'⚠️', ibg:'rgba(239,68,68,.12)', cls:'ur'},
+  AI_INSIGHT: {ic:'🤖', ibg:'rgba(99,102,241,.12)', cls:'ub'},
+  ACHIEVEMENT: {ic:'🔥', ibg:'rgba(245,158,11,.12)', cls:'ua'},
+  SYSTEM: {ic:'📋', ibg:'rgba(99,102,241,.12)', cls:''},
+}
+
+type StudySessionItem = {
+  id: string
+  subject?: string | null
+  startTime: string
+  endTime?: string | null
+  durationMins?: number | null
+  focusScore?: number | null
+  type: 'POMODORO' | 'DEEP_WORK' | 'REVIEW' | 'PRACTICE' | 'READING'
+  task?: { title: string; subject?: string | null } | null
+}
+
+const sessionIcons: Record<string,string> = { POMODORO:'🍅', DEEP_WORK:'🧠', REVIEW:'📖', PRACTICE:'✏️', READING:'📚' }
+
 type Page = 'dashboard'|'tasks'|'kira'|'timer'|'calendar'|'goals'|'analytics'|'notifications'|'settings'
 
 export default function DashboardPage() {
@@ -27,8 +57,14 @@ export default function DashboardPage() {
   const [timerRemain, setTimerRemain] = useState(1500)
   const [timerTotal, setTimerTotal] = useState(1500)
   const [timerMode, setTimerMode] = useState('Pomodoro')
+  const [customH, setCustomH] = useState(0)
+  const [customM, setCustomM] = useState(25)
+  const [customS, setCustomS] = useState(0)
+  const [showCustomSetup, setShowCustomSetup] = useState(false)
   const [goalFormOpen, setGoalFormOpen] = useState(false)
-  const [notifRead, setNotifRead] = useState(false)
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [notifLoading, setNotifLoading] = useState(false)
+  const unreadCount = notifications.filter(n=>!n.isRead).length
   const [settingsTab, setSettingsTab] = useState('profile')
   const timerRef = useRef<ReturnType<typeof setInterval>|null>(null)
 
@@ -65,6 +101,12 @@ export default function DashboardPage() {
   }
   const [analytics, setAnalytics] = useState<Analytics|null>(null)
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
+  // Today's sessions
+  const [todaySessions, setTodaySessions] = useState<StudySessionItem[]>([])
+  const [todayTotalMins, setTodayTotalMins] = useState(0)
+  const [sessionsLoading, setSessionsLoading] = useState(false)
+  // Calendar
+  const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); d.setDate(1); return d })
 
   const titles: Record<Page,string> = {dashboard:'Dashboard',tasks:'Tasks',kira:'Ask Kira',timer:'Study Timer',calendar:'Calendar',goals:'Goals',analytics:'Analytics',notifications:'Notifications',settings:'Settings'}
   const mainNav: {id:Page,icon:string,label:string,badge?:string}[] = [
@@ -83,8 +125,14 @@ export default function DashboardPage() {
 
   function navTo(p: Page) { setPage(p); setSidebarOpen(false); setMoreOpen(false) }
 
-  function formatTime(s: number) { return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}` }
-  const dashOffset = 502 * (1 - timerRemain / timerTotal)
+  function formatTime(s: number) {
+    const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60
+    return h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}` : `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
+  }
+  const circleSize = 260
+  const circleR = 118
+  const circumference = 2 * Math.PI * circleR
+  const dashOffset = circumference * (1 - timerRemain / timerTotal)
 
   function toggleTimer() {
     if (timerRunning) { if(timerRef.current) clearInterval(timerRef.current); setTimerRunning(false) }
@@ -119,7 +167,7 @@ export default function DashboardPage() {
     setTimerRemain(timerTotal)
   }
   function resetTimer() { if(timerRef.current) clearInterval(timerRef.current); setTimerRunning(false); setTimerRemain(timerTotal) }
-  function setMode(name: string, secs: number) { if(timerRef.current) clearInterval(timerRef.current); setTimerRunning(false); setTimerMode(name); setTimerTotal(secs); setTimerRemain(secs) }
+  function setMode(name: string, secs: number) { if(timerRef.current) clearInterval(timerRef.current); setTimerRunning(false); setTimerMode(name); setTimerTotal(secs); setTimerRemain(secs); setShowCustomSetup(false) }
   useEffect(() => () => { if(timerRef.current) clearInterval(timerRef.current) }, [])
 
   // ── Fetch tasks from real API ─────────────────────────────────
@@ -298,6 +346,7 @@ export default function DashboardPage() {
       if (res.ok) {
         showToast('✅ Session saved!')
         fetchAnalytics()
+        fetchTodaySessions()
       }
     } catch (err) { console.error('Failed to save session:', err) }
     setSessionStart(null)
@@ -317,6 +366,67 @@ export default function DashboardPage() {
   }, [])
 
   useEffect(() => { fetchAnalytics() }, [fetchAnalytics])
+
+  // ── Today's sessions ───────────────────────────────────────────
+  const fetchTodaySessions = useCallback(async () => {
+    setSessionsLoading(true)
+    try {
+      const start = new Date(); start.setHours(0,0,0,0)
+      const end = new Date(); end.setHours(23,59,59,999)
+      const res = await fetch(`/api/sessions?from=${start.toISOString()}&to=${end.toISOString()}`)
+      if (res.ok) {
+        const data = await res.json()
+        setTodaySessions(data.sessions || [])
+        setTodayTotalMins(data.totalMins || 0)
+      }
+    } catch (err) { console.error('Failed to fetch sessions:', err) }
+    finally { setSessionsLoading(false) }
+  }, [])
+
+  useEffect(() => { fetchTodaySessions() }, [fetchTodaySessions])
+
+  function formatClock(dateStr: string) {
+    return new Date(dateStr).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  }
+
+  function formatMinsLabel(mins: number) {
+    const h = Math.floor(mins / 60), m = mins % 60
+    if (h <= 0) return `${m}m`
+    return m > 0 ? `${h}h ${m}m` : `${h}h`
+  }
+
+  // ── Notifications ─────────────────────────────────────────────
+  const fetchNotifications = useCallback(async () => {
+    setNotifLoading(true)
+    try {
+      const res = await fetch('/api/notifications')
+      if (res.ok) {
+        const data = await res.json()
+        setNotifications(data.notifications || [])
+      }
+    } catch (err) { console.error('Failed to fetch notifications:', err) }
+    finally { setNotifLoading(false) }
+  }, [])
+
+  useEffect(() => { fetchNotifications() }, [fetchNotifications])
+
+  async function markAllNotificationsRead() {
+    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })))
+    try { await fetch('/api/notifications', { method: 'PATCH' }) }
+    catch (err) { console.error('Failed to mark notifications read:', err) }
+    showToast('✓ All read')
+  }
+
+  function formatNotifTime(dateStr: string) {
+    const mins = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000)
+    if (mins < 1) return 'Just now'
+    if (mins < 60) return `${mins} min ago`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24) return `${hrs}h ago`
+    const days = Math.floor(hrs / 24)
+    if (days < 7) return `${days}d ago`
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }
 
   // ── Kira AI Chat ──────────────────────────────────────────────
   async function sendChatMessage() {
@@ -376,18 +486,38 @@ export default function DashboardPage() {
     return { label: `${diff} days`, urgent: false }
   }
 
-  const calEvents: Record<number,{t:string,c:string}[]> = {
-    23:[{t:'Calculus PS3',c:'#6366f1'},{t:'Study 9–11AM',c:'#10b981'}],
-    24:[{t:'English Essay',c:'#8b5cf6'}],
-    25:[{t:'DS Assignment',c:'#ef4444'},{t:'Study Block',c:'#10b981'}],
-    26:[{t:'⭐ Today',c:'#f59e0b'},{t:'Physics Lab',c:'#3b82f6'}],
-    27:[{t:'DS DUE',c:'#ef4444'}],
-    28:[{t:'Free',c:'#475569'}],
-    1:[{t:'Math Exam',c:'#ef4444'}],
-  }
+  // ── Calendar ──────────────────────────────────────────────────
+  function prevMonth() { setCalendarMonth(d => { const nd = new Date(d); nd.setMonth(nd.getMonth()-1); return nd }) }
+  function nextMonth() { setCalendarMonth(d => { const nd = new Date(d); nd.setMonth(nd.getMonth()+1); return nd }) }
+
+  const calendarDays = (() => {
+    const year = calendarMonth.getFullYear()
+    const month = calendarMonth.getMonth()
+    const startOffset = (new Date(year, month, 1).getDay() + 6) % 7
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7
+    return Array.from({ length: totalCells }, (_, i) => new Date(year, month, 1 - startOffset + i))
+  })()
+
+  const calEvents: Record<string,{t:string,c:string}[]> = {}
+  tasks.forEach(t => {
+    if (!t.dueDate) return
+    const key = new Date(t.dueDate).toDateString()
+    if (!calEvents[key]) calEvents[key] = []
+    calEvents[key].push({ t: t.title, c: priorityColor(t.priority) })
+  })
 
   const heatLvls = ['#ffffff09','#f59e0b28','#f59e0b55','#f59e0b88','#f59e0b']
-  const heatData = [0,1,0,2,3,4,3,2,1,0,1,2,3,4,3,2,1,0,0,1,2,3,4,2,1,0,1,2]
+  const heatData = (() => {
+    const levels = (analytics?.dailyData || []).map(d => {
+      if (d.studyMins <= 0) return 0
+      if (d.studyMins < 30) return 1
+      if (d.studyMins < 60) return 2
+      if (d.studyMins < 120) return 3
+      return 4
+    })
+    return [...Array(Math.max(0, 28 - levels.length)).fill(0), ...levels]
+  })()
 
   return (
     <>
@@ -401,10 +531,6 @@ export default function DashboardPage() {
         /* Sidebar */
         .sidebar{width:var(--sb);flex-shrink:0;background:var(--sur);border-right:1px solid var(--bdr);display:flex;flex-direction:column;height:100%;overflow:hidden;transition:transform .28s cubic-bezier(.16,1,.3,1);z-index:200;}
         .sb-logo{display:flex;align-items:center;gap:10px;padding:14px 13px 12px;border-bottom:1px solid var(--bdr);flex-shrink:0;}
-        .sb-logo-sub{font-size:10px;color:var(--mut);}
-        .logo-icon{width:30px;height:30px;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;}
-        .logo-text{font-size:14px;font-weight:800;color:var(--tx);}
-        .logo-text span{color:var(--amb);}
         .sb-nav{flex:1;overflow-y:auto;padding:8px 6px;}
         .sb-sec{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);padding:9px 10px 4px;}
         .sb-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;cursor:pointer;transition:all .15s;color:var(--mut);font-weight:500;font-size:13px;position:relative;user-select:none;margin-bottom:1px;border:none;background:none;width:100%;text-align:left;font-family:inherit;}
@@ -474,6 +600,13 @@ export default function DashboardPage() {
         .btn-ghost:active{background:rgba(255,255,255,.09);}
         .btn-ai{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;}
         .btn-red{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.25);color:#fca5a5;}
+        /* Custom timer setup */
+        .cu-unit{position:relative;display:inline-block;padding:0 3px;border-radius:6px;transition:background .15s;}
+        .cu-unit:hover{background:rgba(245,158,11,.12);}
+        .cu-arrow{position:absolute;left:50%;transform:translateX(-50%);opacity:0;transition:opacity .15s;background:none;border:none;color:var(--amb);cursor:pointer;font-size:14px;line-height:1;padding:2px 6px;}
+        .cu-arrow.up{top:-24px;}
+        .cu-arrow.down{bottom:-24px;}
+        .cu-unit:hover .cu-arrow{opacity:1;}
         /* AI Banner */
         .ai-banner{background:linear-gradient(135deg,rgba(30,27,75,.9),rgba(49,46,129,.6),rgba(22,25,39,.9));border:1px solid rgba(99,102,241,.25);border-radius:var(--r);padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:14px;}
         .ai-icon{width:40px;height:40px;background:linear-gradient(135deg,#4f46e5,#7c3aed);border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
@@ -595,7 +728,7 @@ export default function DashboardPage() {
         {moreNav.map(item=>(
           <button key={item.id} className={`mm-item${page===item.id?' active':''}`} onClick={()=>navTo(item.id)}>
             <span style={{fontSize:18}}>{item.icon}</span>{item.label}
-            {item.id==='notifications'&&!notifRead && <span style={{marginLeft:'auto',background:'var(--red)',color:'#fff',fontSize:10,fontWeight:700,padding:'1px 6px',borderRadius:100}}>3</span>}
+            {item.id==='notifications'&&unreadCount>0 && <span style={{marginLeft:'auto',background:'var(--red)',color:'#fff',fontSize:10,fontWeight:700,padding:'1px 6px',borderRadius:100}}>{unreadCount}</span>}
           </button>
         ))}
         <div style={{height:1,background:'var(--bdr)',margin:'6px 0'}}/>
@@ -609,8 +742,7 @@ export default function DashboardPage() {
           {/* Sidebar */}
           <aside className={`sidebar${sidebarOpen?' open':''}`}>
             <div className="sb-logo">
-              <div className="logo-icon">⚡</div>
-              <div><div className="logo-text">Kira<span>Flow</span></div><div className="sb-logo-sub">AI · v1.0</div></div>
+              <Logo href="/dashboard" iconSize={28} textClassName="text-sm" subtitle="AI · v1.0" />
             </div>
             <nav className="sb-nav">
               <div className="sb-sec">Main</div>
@@ -618,7 +750,7 @@ export default function DashboardPage() {
                 <button key={item.id} className={`sb-item${page===item.id?' active':''}`} onClick={()=>navTo(item.id)}>
                   <span className="sb-icon">{item.icon}</span>{item.label}
                   {item.id==='tasks'&&todoTasks.length>0&&<span className="sb-badge sb-badge-amb">{todoTasks.length}</span>}
-                  {item.id==='notifications'&&!notifRead&&<span className="sb-badge sb-badge-red">3</span>}
+                  {item.id==='notifications'&&unreadCount>0&&<span className="sb-badge sb-badge-red">{unreadCount}</span>}
                 </button>
               ))}
             </nav>
@@ -637,7 +769,7 @@ export default function DashboardPage() {
               </div>
               <div className="tb-right">
                 <div className="tb-date">Thu 26 Feb 2026</div>
-                <button className="icon-btn" onClick={()=>navTo('notifications')}>🔔{!notifRead&&<div className="notif-dot"/>}</button>
+                <button className="icon-btn" onClick={()=>navTo('notifications')}>🔔{unreadCount>0&&<div className="notif-dot"/>}</button>
                 <button className="icon-btn" onClick={()=>navTo('settings')}><div className="av" style={{width:26,height:26,fontSize:11}}>A</div></button>
                 <button className="btn btn-ghost" style={{fontSize:11,color:'var(--red)',padding:'6px 10px'}} onClick={()=>router.push('/')}>↩</button>
               </div>
@@ -664,22 +796,41 @@ export default function DashboardPage() {
                 <div className="g2">
                   <div>
                     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><div style={{fontSize:13,fontWeight:700}}>🤖 AI-Prioritized Tasks</div><button className="btn btn-ai" style={{padding:'5px 10px',fontSize:11}} onClick={()=>showToast('🤖 AI re-ranking tasks...')}>✨ Re-rank</button></div>
-                    {[{title:'Data Structures',sub:[{c:'b-cs',l:'CS'},{c:'b-urg',l:'URGENT'},{c:'b-ai',l:'🤖 #1'}],due:'⚠ Tomorrow',urg:true},{title:'Calculus PS4',sub:[{c:'b-math',l:'Math'},{c:'b-hi',l:'HIGH'}],due:'2 days',urg:false},{title:'Essay Draft',sub:[{c:'b-eng',l:'English'},{c:'b-med',l:'MED'}],due:'5 days',urg:false}].map(t=>(
-                      <div key={t.title} className="task-item" onClick={()=>navTo('tasks')}>
-                        <div className="chk" onClick={e=>{e.stopPropagation();(e.currentTarget as HTMLElement).classList.toggle('done');(e.currentTarget as HTMLElement).textContent=(e.currentTarget as HTMLElement).classList.contains('done')?'✓':'';showToast('✅ Task complete!')}}/>
-                        <div className="ti-info"><div className="ti-title">{t.title}</div><div className="ti-meta">{t.sub.map(b=><span key={b.l} className={`badge ${b.c}`}>{b.l}</span>)}</div></div>
-                        <div className={`ti-due${t.urg?' urg':''}`}>{t.due}</div>
-                      </div>
-                    ))}
+                    {(() => {
+                      const pending = [...tasks].filter(t=>t.status==='TODO'||t.status==='IN_PROGRESS').sort((a,b)=>(b.aiPriority||0)-(a.aiPriority||0)).slice(0,3)
+                      if (pending.length === 0) return <div style={{fontSize:12,color:'var(--mut)',textAlign:'center',padding:'20px 0'}}>No tasks yet</div>
+                      return pending.map(t=>{
+                        const due = formatDue(t.dueDate)
+                        return (
+                          <div key={t.id} className="task-item" onClick={()=>navTo('tasks')}>
+                            <div className={`chk${t.status==='COMPLETED'?' done':''}`} onClick={e=>{e.stopPropagation();toggleTask(t)}}>{t.status==='COMPLETED'?'✓':''}</div>
+                            <div className="ti-info"><div className="ti-title">{t.title}</div><div className="ti-meta">{t.subject && <span className="badge b-cs">{t.subject}</span>}<span className="badge" style={{background:'rgba(255,255,255,.06)',color:priorityColor(t.priority)}}>{t.priority}</span></div></div>
+                            {due && <div className={`ti-due${due.urgent?' urg':''}`}>{due.label}</div>}
+                          </div>
+                        )
+                      })
+                    })()}
                     <button className="btn btn-ghost" style={{width:'100%',marginTop:8}} onClick={()=>navTo('tasks')}>View all tasks →</button>
                   </div>
                   <div style={{display:'flex',flexDirection:'column',gap:12}}>
-                    <div className="card"><div className="card-t">📈 Study Hours – This Week</div><div className="bar-chart">{[{h:'55%',c:'var(--amb)',l:'M'},{h:'75%',c:'var(--amb)',l:'T'},{h:'45%',c:'var(--amb)',l:'W'},{h:'88%',c:'var(--amb)',l:'T'},{h:'65%',c:'var(--blu)',l:'F'},{h:'15%',c:'rgba(255,255,255,.1)',l:'S'},{h:'10%',c:'rgba(255,255,255,.1)',l:'S'}].map(b=><div key={b.l} className="bw"><div className="bar" style={{height:b.h,background:`linear-gradient(180deg,${b.c},${b.c}aa)`}}/><div className="blbl">{b.l}</div></div>)}</div></div>
+                    <div className="card"><div className="card-t">📈 Study Hours – This Week</div><div className="bar-chart">{(() => {
+                      const daily = analytics?.dailyData || []
+                      const maxMins = Math.max(60, ...daily.map((d:DailyData)=>d.studyMins))
+                      return daily.map((b:DailyData,i:number)=>{
+                        const pct = Math.round((b.studyMins/maxMins)*100)
+                        const isWeekend = b.label==='Sat'||b.label==='Sun'
+                        return <div key={i} className="bw"><div className="bar" style={{height:`${Math.max(4,pct)}%`,background:`linear-gradient(180deg,${isWeekend?'rgba(255,255,255,.12)':'var(--amb)'},${isWeekend?'rgba(255,255,255,.08)':'var(--amb)'}aa)`}} title={`${(b.studyMins/60).toFixed(1)}h`}/><div className="blbl">{b.label[0]}</div></div>
+                      })
+                    })()}</div></div>
                     <div className="card">
                       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}><div className="card-t" style={{margin:0}}>🎯 Goals</div><button className="btn btn-ghost" style={{padding:'4px 10px',fontSize:11}} onClick={()=>navTo('goals')}>All</button></div>
-                      {[{l:'Weekly 20hrs',pct:'68%',w:'68%',c:'linear-gradient(90deg,#6366f1,#f59e0b)'},{l:'15 Tasks',pct:'53%',w:'53%',c:'var(--grn)'},{l:'10-Day Streak',pct:'70%',w:'70%',c:'#f97316'}].map(g=>(
-                        <div key={g.l} style={{marginBottom:8}}><div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}><span style={{fontWeight:600}}>{g.l}</span><span style={{fontFamily:"'DM Mono',monospace",color:g.c.includes('grn')?'var(--grn)':'var(--amb)'}}>{g.pct}</span></div><div className="pt"><div className="pf" style={{width:g.w,background:g.c}}/></div></div>
-                      ))}
+                      {goals.length===0 && <div style={{fontSize:12,color:'var(--mut)',textAlign:'center',padding:'12px 0'}}>No active goals yet</div>}
+                      {goals.slice(0,3).map(g=>{
+                        const pct = Math.min(100, Math.round((g.currentValue / g.targetValue) * 100))
+                        return (
+                          <div key={g.id} style={{marginBottom:8}}><div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}><span style={{fontWeight:600}}>{g.title}</span><span style={{fontFamily:"'DM Mono',monospace",color:pct>=100?'var(--grn)':'var(--amb)'}}>{pct}%</span></div><div className="pt"><div className="pf" style={{width:`${pct}%`,background:pct>=100?'var(--grn)':'linear-gradient(90deg,#6366f1,#f59e0b)'}}/></div></div>
+                        )
+                      })}
                     </div>
                     <div className="card"><div className="card-t">🔥 Activity</div><div className="heatmap">{heatData.map((v,i)=><div key={i} className="hm-c" style={{background:heatLvls[v]}}/>)}</div></div>
                   </div>
@@ -848,40 +999,70 @@ export default function DashboardPage() {
               <div className={`dp${page==='timer'?' active':''}`}>
                 <div className="g2" style={{alignItems:'start'}}>
                   <div className="card" style={{textAlign:'center',padding:'24px 18px'}}>
-                    <div style={{display:'flex',gap:6,justifyContent:'center',marginBottom:18,flexWrap:'wrap'}}>
+                    <div style={{display:'flex',gap:6,justifyContent:'center',marginBottom:18,flexWrap:'wrap',alignItems:'center'}}>
                       {[{n:'Pomodoro',s:1500},{n:'Deep Work',s:3000},{n:'Break',s:300}].map(m=>(
                         <button key={m.n} className={`btn ${timerMode===m.n?'btn-amb':'btn-ghost'}`} style={{fontSize:12}} onClick={()=>setMode(m.n,m.s)}>{m.n==='Pomodoro'?'🍅':m.n==='Deep Work'?'🧠':'☕'} {m.n}</button>
                       ))}
+                      <button className={`btn ${timerMode==='Custom'||showCustomSetup?'btn-amb':'btn-ghost'}`} style={{fontSize:12}} onClick={()=>setShowCustomSetup(v=>!v)}>⚙ Set Custom</button>
                     </div>
-                    <div style={{position:'relative',width:180,height:180,margin:'0 auto 18px'}}>
-                      <svg style={{transform:'rotate(-90deg)'}} width="180" height="180" viewBox="0 0 180 180">
-                        <circle fill="none" stroke="rgba(255,255,255,.06)" strokeWidth="8" cx="90" cy="90" r="80"/>
-                        <circle fill="none" stroke="#f59e0b" strokeWidth="8" strokeLinecap="round" strokeDasharray="502" cx="90" cy="90" r="80" style={{strokeDashoffset:dashOffset,transition:'stroke-dashoffset 1s linear'}}/>
+                    <div style={{position:'relative',width:circleSize,height:circleSize,margin:'0 auto 18px'}}>
+                      <svg style={{transform:'rotate(-90deg)'}} width={circleSize} height={circleSize} viewBox={`0 0 ${circleSize} ${circleSize}`}>
+                        <circle fill="none" stroke="rgba(255,255,255,.06)" strokeWidth="8" cx={circleSize/2} cy={circleSize/2} r={circleR}/>
+                        <circle fill="none" stroke="#f59e0b" strokeWidth="8" strokeLinecap="round" strokeDasharray={circumference} cx={circleSize/2} cy={circleSize/2} r={circleR} style={{strokeDashoffset:showCustomSetup?0:dashOffset,transition:'stroke-dashoffset 1s linear'}}/>
                       </svg>
                       <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
-                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:38,fontWeight:700,color:'var(--amb)'}}>{formatTime(timerRemain)}</div>
-                        <div style={{fontSize:10,color:'var(--mut)',textTransform:'uppercase',letterSpacing:'.1em',marginTop:2}}>{timerMode}</div>
+                        {showCustomSetup ? (<>
+                          <div style={{display:'flex',alignItems:'center',fontFamily:"'DM Mono',monospace",fontSize:38,fontWeight:700,color:'var(--amb)'}}>
+                            {[{label:'Hours',val:customH,set:setCustomH,max:99},{label:'Minutes',val:customM,set:setCustomM,max:59},{label:'Seconds',val:customS,set:setCustomS,max:59}].map((u,i)=>(
+                              <span key={u.label} style={{display:'flex',alignItems:'center'}}>
+                                {i>0 && <span>:</span>}
+                                <span className="cu-unit">
+                                  <button className="cu-arrow up" onClick={()=>u.set((v:number)=>v>=u.max?0:v+1)}>▲</button>
+                                  {String(u.val).padStart(2,'0')}
+                                  <button className="cu-arrow down" onClick={()=>u.set((v:number)=>v<=0?u.max:v-1)}>▼</button>
+                                </span>
+                              </span>
+                            ))}
+                          </div>
+                          <div style={{fontSize:10,color:'var(--mut)',textTransform:'uppercase',letterSpacing:'.1em',marginTop:2}}>Custom</div>
+                        </>) : (<>
+                          <div style={{fontFamily:"'DM Mono',monospace",fontSize:38,fontWeight:700,color:'var(--amb)'}}>{formatTime(timerRemain)}</div>
+                          <div style={{fontSize:10,color:'var(--mut)',textTransform:'uppercase',letterSpacing:'.1em',marginTop:2}}>{timerMode}</div>
+                        </>)}
                       </div>
                     </div>
                     <input className="f-input" placeholder="What are you studying? (optional)" value={sessionSubject} onChange={e=>setSessionSubject(e.target.value)} style={{maxWidth:260,marginBottom:14,margin:'0 auto 14px',display:'block'}}/>
                     <div style={{display:'flex',gap:8,justifyContent:'center'}}>
-                      <button className="btn btn-ghost" onClick={resetTimer}>↺ Reset</button>
-                      <button className="btn btn-amb" style={{padding:'11px 28px',fontSize:15}} onClick={toggleTimer}>{timerRunning?'⏸ Pause':'▶ Start'}</button>
-                      <button className="btn btn-ghost" onClick={finishSession}>✓ Finish</button>
+                      {showCustomSetup ? (
+                        <button className="btn btn-amb" style={{padding:'11px 28px',fontSize:15}} onClick={()=>setMode('Custom', Math.max(1, customH*3600+customM*60+customS))}>▶ Start Custom Timer</button>
+                      ) : (<>
+                        <button className="btn btn-ghost" onClick={resetTimer}>↺ Reset</button>
+                        <button className="btn btn-amb" style={{padding:'11px 28px',fontSize:15}} onClick={toggleTimer}>{timerRunning?'⏸ Pause':'▶ Start'}</button>
+                        <button className="btn btn-ghost" onClick={finishSession}>✓ Finish</button>
+                      </>)}
                     </div>
-                    <div style={{marginTop:12,fontSize:11,color:'var(--mut)'}}>Session 2 of 4 · 🔥 3 done today</div>
+                    <div style={{marginTop:12,fontSize:11,color:'var(--mut)'}}>🔥 {todaySessions.length} session{todaySessions.length===1?'':'s'} done today</div>
                   </div>
                   <div style={{display:'flex',flexDirection:'column',gap:12}}>
                     <div className="card">
                       <div className="card-t">📅 Today&apos;s Sessions</div>
-                      {[{ic:'🍅',bg:'rgba(245,158,11,.12)',t:'Data Structures',time:'9:00 – 9:25 AM',dur:'25min',fc:'var(--amb)',focus:'9/10'},{ic:'🧠',bg:'rgba(99,102,241,.12)',t:'Calculus Review',time:'10:00 – 10:50 AM',dur:'50min',fc:'var(--blu)',focus:'8/10'}].map(s=>(
-                        <div key={s.t} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 0',borderBottom:'1px solid var(--bdr)'}}>
-                          <div style={{width:32,height:32,borderRadius:8,background:s.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15}}>{s.ic}</div>
-                          <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{s.t}</div><div style={{fontSize:11,color:'var(--mut)'}}>{s.time}</div></div>
-                          <div style={{textAlign:'right'}}><div style={{fontWeight:700,fontFamily:"'DM Mono',monospace",color:s.fc,fontSize:13}}>{s.dur}</div><div style={{fontSize:11,color:'var(--grn)'}}>Focus: {s.focus}</div></div>
+                      {sessionsLoading ? (
+                        <div style={{padding:'20px 0',textAlign:'center',color:'var(--mut)',fontSize:13}}>Loading...</div>
+                      ) : todaySessions.length === 0 ? (
+                        <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:120,color:'var(--tx2)',gap:8}}>
+                          <div style={{fontSize:28}}>⏱️</div>
+                          <div style={{fontSize:13}}>No sessions yet today</div>
                         </div>
-                      ))}
-                      <div style={{paddingTop:10,borderTop:'1px solid var(--bdr)',display:'flex',justifyContent:'space-between',fontSize:12}}><span style={{color:'var(--mut)'}}>Total today:</span><span style={{fontWeight:700,fontFamily:"'DM Mono',monospace",color:'var(--amb)'}}>2h 40m</span></div>
+                      ) : (<>
+                        {todaySessions.map(s=>(
+                          <div key={s.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 0',borderBottom:'1px solid var(--bdr)'}}>
+                            <div style={{width:32,height:32,borderRadius:8,background:'rgba(245,158,11,.12)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:15}}>{sessionIcons[s.type]||'⏱️'}</div>
+                            <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{s.task?.title || s.subject || 'Study Session'}</div><div style={{fontSize:11,color:'var(--mut)'}}>{formatClock(s.startTime)}{s.endTime?` – ${formatClock(s.endTime)}`:''}</div></div>
+                            <div style={{textAlign:'right'}}><div style={{fontWeight:700,fontFamily:"'DM Mono',monospace",color:'var(--amb)',fontSize:13}}>{s.durationMins||0}min</div><div style={{fontSize:11,color:'var(--grn)'}}>{s.focusScore!=null?`Focus: ${s.focusScore}/10`:''}</div></div>
+                          </div>
+                        ))}
+                        <div style={{paddingTop:10,borderTop:'1px solid var(--bdr)',display:'flex',justifyContent:'space-between',fontSize:12}}><span style={{color:'var(--mut)'}}>Total today:</span><span style={{fontWeight:700,fontFamily:"'DM Mono',monospace",color:'var(--amb)'}}>{formatMinsLabel(todayTotalMins)}</span></div>
+                      </>)}
                     </div>
                     <div className="card">
                       <div className="card-t">⚙ Settings</div>
@@ -899,20 +1080,26 @@ export default function DashboardPage() {
               {/* ── CALENDAR ── */}
               <div className={`dp${page==='calendar'?' active':''}`}>
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14,gap:8,flexWrap:'wrap'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:10}}><button className="btn btn-ghost" style={{padding:'7px 12px'}}>←</button><div style={{fontSize:15,fontWeight:800}}>February 2026</div><button className="btn btn-ghost" style={{padding:'7px 12px'}}>→</button></div>
+                  <div style={{display:'flex',alignItems:'center',gap:10}}><button className="btn btn-ghost" style={{padding:'7px 12px'}} onClick={prevMonth}>←</button><div style={{fontSize:15,fontWeight:800}}>{calendarMonth.toLocaleDateString('en-US',{month:'long',year:'numeric'})}</div><button className="btn btn-ghost" style={{padding:'7px 12px'}} onClick={nextMonth}>→</button></div>
                   <div style={{display:'flex',gap:8}}><button className="btn btn-ai" style={{fontSize:12}} onClick={()=>showToast('🤖 Generating schedule...')}>🤖 AI Plan</button><button className="btn btn-amb" style={{fontSize:12}}>+ Event</button></div>
                 </div>
                 <div className="card" style={{padding:0,overflow:'hidden'}}>
                   <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',borderBottom:'1px solid var(--bdr)'}}>
-                    {['M','T','W','T','F','S','S'].map((d,i)=><div key={i} style={{padding:'10px 4px',textAlign:'center',fontSize:10,fontWeight:700,color:i===4?'var(--amb)':'var(--mut)'}}>{d}</div>)}
+                    {['M','T','W','T','F','S','S'].map((d,i)=><div key={i} style={{padding:'10px 4px',textAlign:'center',fontSize:10,fontWeight:700,color:'var(--mut)'}}>{d}</div>)}
                   </div>
                   <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)'}}>
-                    {[23,24,25,26,27,28,1].map(d=>(
-                      <div key={d} style={{minHeight:80,padding:'8px 6px',borderRight:'1px solid rgba(255,255,255,.05)',borderBottom:'1px solid rgba(255,255,255,.05)',background:d===26?'rgba(245,158,11,.05)':''}}>
-                        <div style={{fontSize:12,fontWeight:d===26?800:600,color:d===26?'var(--amb)':'var(--tx)',marginBottom:4}}>{d}</div>
-                        {(calEvents[d]||[]).map(ev=><div key={ev.t} style={{background:`${ev.c}22`,borderLeft:`2px solid ${ev.c}`,borderRadius:3,padding:'2px 4px',fontSize:9,marginBottom:2,color:ev.c,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ev.t}</div>)}
-                      </div>
-                    ))}
+                    {calendarDays.map((date,i)=>{
+                      const isToday = date.toDateString() === new Date().toDateString()
+                      const inMonth = date.getMonth() === calendarMonth.getMonth()
+                      const events = calEvents[date.toDateString()] || []
+                      return (
+                        <div key={i} style={{minHeight:80,padding:'8px 6px',borderRight:'1px solid rgba(255,255,255,.05)',borderBottom:'1px solid rgba(255,255,255,.05)',background:isToday?'rgba(245,158,11,.05)':'',opacity:inMonth?1:0.35}}>
+                          <div style={{fontSize:12,fontWeight:isToday?800:600,color:isToday?'var(--amb)':'var(--tx)',marginBottom:4}}>{date.getDate()}</div>
+                          {events.slice(0,3).map((ev,j)=><div key={j} style={{background:`${ev.c}22`,borderLeft:`2px solid ${ev.c}`,borderRadius:3,padding:'2px 4px',fontSize:9,marginBottom:2,color:ev.c,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ev.t}</div>)}
+                          {events.length>3 && <div style={{fontSize:9,color:'var(--mut)',marginTop:2}}>+{events.length-3} more</div>}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               </div>
@@ -990,17 +1177,27 @@ export default function DashboardPage() {
 
               {/* ── NOTIFICATIONS ── */}
               <div className={`dp${page==='notifications'?' active':''}`}>
-                <div style={{display:'flex',justifyContent:'flex-end',marginBottom:12}}><button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>{setNotifRead(true);showToast('✓ All read')}}>✓ Mark all read</button></div>
+                <div style={{display:'flex',justifyContent:'flex-end',marginBottom:12}}><button className="btn btn-ghost" style={{fontSize:12}} onClick={markAllNotificationsRead} disabled={unreadCount===0}>✓ Mark all read</button></div>
                 <div className="nf-bar">
                   {['All','Unread','🤖 AI','🔔 Reminders','🏆 Wins'].map(f=><button key={f} className={`nf${f==='All'?' active':''}`} onClick={e=>{document.querySelectorAll('.nf').forEach(b=>b.classList.remove('active'));(e.currentTarget as HTMLElement).classList.add('active')}}>{f}</button>)}
                 </div>
-                {[{cls:'ur',ic:'⚠️',ibg:'rgba(239,68,68,.12)',t:'Task Due Tomorrow!',d:'Data Structures due tomorrow 11:59 PM.',time:'5 min ago'},{cls:'ub',ic:'🤖',ibg:'rgba(99,102,241,.12)',t:'AI Analysis Ready',d:'Kira prioritized your tasks for today.',time:'9:02 AM'},{cls:'ua',ic:'🔥',ibg:'rgba(245,158,11,.12)',t:'7-Day Streak!',d:"You've studied every day this week!",time:'8:00 AM'},{cls:'',ic:'📋',ibg:'rgba(99,102,241,.12)',t:'Tasks Re-prioritized',d:'DS (#1), Calculus (#2), Essay (#3).',time:'8:45 AM',dim:true},{cls:'',ic:'📅',ibg:'rgba(16,185,129,.12)',t:'Session Reminder',d:'Calculus block starts in 15 min.',time:'9:45 AM',dim:true}].map(n=>(
-                  <div key={n.t} className={`notif-item${n.cls?' '+n.cls:''}`} style={(n as {dim?:boolean}).dim?{opacity:.65}:{}}>
-                    <div className="n-icon" style={{background:n.ibg}}>{n.ic}</div>
-                    <div style={{flex:1}}><div className="n-title">{n.t}</div><div className="n-desc">{n.d}</div><div className="n-time">{n.time}</div></div>
-                    {!notifRead && n.cls && <div className="n-dot" style={n.cls==='ub'?{background:'var(--blu)'}:{}}/>}
+                {notifLoading ? (
+                  <div style={{fontSize:12,color:'var(--mut)',textAlign:'center',padding:'30px 0'}}>Loading...</div>
+                ) : notifications.length === 0 ? (
+                  <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:200,color:'var(--tx2)',gap:12}}>
+                    <div style={{fontSize:32}}>🔔</div>
+                    <div style={{fontSize:13}}>No notifications yet</div>
                   </div>
-                ))}
+                ) : notifications.map(n=>{
+                  const meta = notifMeta[n.type] || notifMeta.SYSTEM
+                  return (
+                    <div key={n.id} className={`notif-item${meta.cls?' '+meta.cls:''}`} style={n.isRead?{opacity:.65}:{}}>
+                      <div className="n-icon" style={{background:meta.ibg}}>{meta.ic}</div>
+                      <div style={{flex:1}}><div className="n-title">{n.title}</div><div className="n-desc">{n.message}</div><div className="n-time">{formatNotifTime(n.sentAt)}</div></div>
+                      {!n.isRead && <div className="n-dot" style={meta.cls==='ub'?{background:'var(--blu)'}:{}}/>}
+                    </div>
+                  )
+                })}
               </div>
 
               {/* ── SETTINGS ── */}

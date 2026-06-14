@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import Logo from '@/components/Logo'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -37,10 +38,6 @@ export default function LoginPage() {
         .bg-grid{position:fixed;inset:0;background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
         .page{min-height:100vh;display:flex;position:relative;}
         .left{flex:1;display:flex;flex-direction:column;justify-content:center;padding:60px;position:relative;z-index:1;}
-        .logo{display:flex;align-items:center;gap:10px;text-decoration:none;margin-bottom:50px;}
-        .logo-icon{width:36px;height:36px;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;}
-        .logo-text{font-size:16px;font-weight:800;color:#f1f5f9;}
-        .logo-text span{color:#f59e0b;}
         .left h1{font-size:clamp(28px,3.5vw,48px);font-weight:900;line-height:1.1;letter-spacing:-0.03em;margin-bottom:14px;}
         .left h1 em{color:#f59e0b;font-style:normal;}
         .left p{font-size:15px;color:#64748b;line-height:1.65;max-width:380px;margin-bottom:36px;}
@@ -85,7 +82,7 @@ export default function LoginPage() {
       </div>
       <div className="page">
         <div className="left">
-          <Link href="/" className="logo"><div className="logo-icon">⚡</div><div className="logo-text">Kira<span>Flow</span></div></Link>
+          <Logo className="mb-[50px]" iconSize={32} />
           <h1>Study smarter,<br/>not <em>harder.</em></h1>
           <p>AI-powered task prioritization, burnout detection, and smart scheduling — built for students who want to make every session count.</p>
           {[{ic:'🤖',t:'AI Task Prioritization',d:'GPT-4 ranks by urgency & importance'},{ic:'🔥',t:'Burnout Detection',d:'Get alerted before you hit the wall'},{ic:'📊',t:'Analytics',d:'Track focus, streaks & patterns'}].map(p=>(
