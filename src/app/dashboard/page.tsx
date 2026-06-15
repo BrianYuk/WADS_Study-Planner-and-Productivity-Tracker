@@ -4,6 +4,12 @@ import { useRouter } from 'next/navigation'
 import Logo from '@/components/Logo'
 
 
+type Subtask = {
+  id: string
+  title: string
+  completed: boolean
+}
+
 type Task = {
   id: string
   title: string
@@ -13,8 +19,10 @@ type Task = {
   status: 'TODO' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED'
   dueDate?: string | null
   estimatedMins?: number | null
+  actualMins?: number | null
   aiPriority?: number | null
   tags: string[]
+  subtasks: Subtask[]
 }
 
 type Notification = {
@@ -57,7 +65,6 @@ export default function DashboardPage() {
   const router = useRouter()
   const [page, setPage] = useState<Page>('dashboard')
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [moreOpen, setMoreOpen] = useState(false)
   const [timerRunning, setTimerRunning] = useState(false)
   const [timerRemain, setTimerRemain] = useState(1500)
   const [timerTotal, setTimerTotal] = useState(1500)
@@ -94,8 +101,16 @@ export default function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [tasksLoading, setTasksLoading] = useState(false)
   const [showAddTask, setShowAddTask] = useState(false)
-  const [newTask, setNewTask] = useState({ title: '', subject: '', priority: 'MEDIUM' as Task['priority'], dueDate: '' })
+  const [newTask, setNewTask] = useState({ title: '', subject: '', priority: 'MEDIUM' as Task['priority'], dueDate: '', description: '', estimatedMins: '', tags: '' })
+  const [newSubtasks, setNewSubtasks] = useState<string[]>([])
+  const [newSubtaskInput, setNewSubtaskInput] = useState('')
   const [taskError, setTaskError] = useState('')
+  // Edit task modal
+  const [editingTask, setEditingTask] = useState<Task|null>(null)
+  const [editForm, setEditForm] = useState({ title: '', description: '', subject: '', priority: 'MEDIUM' as Task['priority'], status: 'TODO' as Task['status'], dueDate: '', estimatedMins: '', tags: '' })
+  const [editError, setEditError] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [editSubtaskInput, setEditSubtaskInput] = useState('')
   const [aiPrioritizing, setAiPrioritizing] = useState(false)
   const [userName, setUserName] = useState('Student')
   const [userEmail, setUserEmail] = useState('')
@@ -132,7 +147,7 @@ export default function DashboardPage() {
   const [todayTotalMins, setTodayTotalMins] = useState(0)
   const [sessionsLoading, setSessionsLoading] = useState(false)
   // Calendar
-  const [calendarView, setCalendarView] = useState<'month'|'week'|'year'>('month')
+  const [calendarView, setCalendarView] = useState<'week'|'month'|'year'>('month')
   const [calendarDate, setCalendarDate] = useState(() => { const d = new Date(); d.setHours(0,0,0,0); return d })
   const [selectedDate, setSelectedDate] = useState(() => { const d = new Date(); d.setHours(0,0,0,0); return d })
   const [dayNewTitle, setDayNewTitle] = useState('')
@@ -154,7 +169,7 @@ export default function DashboardPage() {
     {id:'settings',icon:'⚙️',label:'Settings'},
   ]
 
-  function navTo(p: Page) { setPage(p); setSidebarOpen(false); setMoreOpen(false) }
+  function navTo(p: Page) { setPage(p); setSidebarOpen(false) }
   function navActive(p: Page) { return page === p || (p === 'calendar' && page === 'calendarDay') }
 
   // ── Calendar day view ────────────────────────────────────────
@@ -316,7 +331,11 @@ export default function DashboardPage() {
         priority: newTask.priority,
       }
       if (newTask.subject) body.subject = newTask.subject
+      if (newTask.description) body.description = newTask.description
       if (newTask.dueDate) body.dueDate = new Date(newTask.dueDate).toISOString()
+      if (newTask.estimatedMins) body.estimatedMins = parseInt(newTask.estimatedMins, 10)
+      const tags = newTask.tags.split(',').map(t=>t.trim()).filter(Boolean)
+      if (tags.length) body.tags = tags
 
       const res = await fetch('/api/tasks', {
         method: 'POST',
@@ -324,7 +343,17 @@ export default function DashboardPage() {
         body: JSON.stringify(body),
       })
       if (res.ok) {
-        setNewTask({ title: '', subject: '', priority: 'MEDIUM', dueDate: '' })
+        const data = await res.json()
+        for (const title of newSubtasks) {
+          await fetch(`/api/tasks/${data.task.id}/subtasks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title }),
+          })
+        }
+        setNewTask({ title: '', subject: '', priority: 'MEDIUM', dueDate: '', description: '', estimatedMins: '', tags: '' })
+        setNewSubtasks([])
+        setNewSubtaskInput('')
         setShowAddTask(false)
         showToast('✅ Task created!')
         fetchTasks()
@@ -334,6 +363,129 @@ export default function DashboardPage() {
       }
     } catch {
       setTaskError('Network error')
+    }
+  }
+
+  // ── Edit task ────────────────────────────────────────────────
+  function toDatetimeLocal(iso?: string | null) {
+    if (!iso) return ''
+    const d = new Date(iso)
+    const pad = (n:number) => String(n).padStart(2,'0')
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+
+  function openEditTask(task: Task) {
+    setEditingTask(task)
+    setEditForm({
+      title: task.title,
+      description: task.description || '',
+      subject: task.subject || '',
+      priority: task.priority,
+      status: task.status,
+      dueDate: toDatetimeLocal(task.dueDate),
+      estimatedMins: task.estimatedMins ? String(task.estimatedMins) : '',
+      tags: (task.tags || []).join(', '),
+    })
+    setEditError('')
+    setEditSubtaskInput('')
+  }
+
+  async function saveEditTask() {
+    if (!editingTask) return
+    if (!editForm.title.trim()) { setEditError('Title is required'); return }
+    setEditError('')
+    setEditSaving(true)
+    try {
+      const body: Record<string, unknown> = {
+        title: editForm.title.trim(),
+        description: editForm.description.trim() || null,
+        subject: editForm.subject.trim() || null,
+        priority: editForm.priority,
+        status: editForm.status,
+        dueDate: editForm.dueDate ? new Date(editForm.dueDate).toISOString() : null,
+        estimatedMins: editForm.estimatedMins ? parseInt(editForm.estimatedMins, 10) : null,
+        tags: editForm.tags.split(',').map(t=>t.trim()).filter(Boolean),
+      }
+      const res = await fetch(`/api/tasks/${editingTask.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        const wasCompleted = editingTask.status === 'COMPLETED'
+        setTasks((prev:Task[]) => prev.map((t:Task) => t.id === editingTask.id ? data.task : t))
+        setEditingTask(null)
+        showToast('✅ Task updated!')
+        if (data.task.status === 'COMPLETED' && !wasCompleted) await updateGoalsOnTaskComplete()
+      } else {
+        const err = await res.json()
+        setEditError(err.error || 'Failed to update task')
+      }
+    } catch {
+      setEditError('Network error')
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  // ── Subtasks ─────────────────────────────────────────────────
+  function applySubtaskUpdate(taskId: string, updater: (subtasks: Subtask[]) => Subtask[]) {
+    setTasks((prev:Task[]) => prev.map((t:Task) => t.id === taskId ? { ...t, subtasks: updater(t.subtasks) } : t))
+    setEditingTask((prev) => prev && prev.id === taskId ? { ...prev, subtasks: updater(prev.subtasks) } : prev)
+  }
+
+  async function addSubtask(taskId: string, title: string) {
+    if (!title.trim()) return
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/subtasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: title.trim() }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        applySubtaskUpdate(taskId, (subtasks) => [...subtasks, data.subtask])
+      } else {
+        showToast('⚠️ Could not add subtask')
+      }
+    } catch {
+      showToast('⚠️ Network error')
+    }
+  }
+
+  async function toggleSubtask(taskId: string, subtask: Subtask) {
+    const completed = !subtask.completed
+    applySubtaskUpdate(taskId, (subtasks) => subtasks.map(s => s.id === subtask.id ? { ...s, completed } : s))
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/subtasks/${subtask.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed }),
+      })
+      if (!res.ok) {
+        applySubtaskUpdate(taskId, (subtasks) => subtasks.map(s => s.id === subtask.id ? { ...s, completed: !completed } : s))
+        showToast('⚠️ Could not update subtask')
+      }
+    } catch {
+      applySubtaskUpdate(taskId, (subtasks) => subtasks.map(s => s.id === subtask.id ? { ...s, completed: !completed } : s))
+      showToast('⚠️ Network error')
+    }
+  }
+
+  async function deleteSubtask(taskId: string, subtaskId: string) {
+    const prevTask = tasks.find(t => t.id === taskId)
+    const prevSubtasks = prevTask ? prevTask.subtasks : []
+    applySubtaskUpdate(taskId, (subtasks) => subtasks.filter(s => s.id !== subtaskId))
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/subtasks/${subtaskId}`, { method: 'DELETE' })
+      if (!res.ok) {
+        applySubtaskUpdate(taskId, () => prevSubtasks)
+        showToast('⚠️ Could not delete subtask')
+      }
+    } catch {
+      applySubtaskUpdate(taskId, () => prevSubtasks)
+      showToast('⚠️ Network error')
     }
   }
 
@@ -689,6 +841,15 @@ export default function DashboardPage() {
     return { label: `${diff} days`, date, urgent: false }
   }
 
+  function formatMins(mins?: number | null) {
+    if (!mins) return null
+    if (mins < 60) return `${mins}m`
+    const h = Math.floor(mins/60), m = mins%60
+    return m ? `${h}h ${m}m` : `${h}h`
+  }
+
+  const taskInputStyle = {background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:8,padding:'9px 12px',color:'var(--tx)',fontSize:13,outline:'none',width:'100%',fontFamily:'inherit'} as const
+
   // ── Calendar ──────────────────────────────────────────────────
   function calPrev() {
     setCalendarDate(d => {
@@ -897,6 +1058,8 @@ export default function DashboardPage() {
         .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 14px;border-radius:9px;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;transition:all .15s;white-space:nowrap;}
         .btn-amb{background:linear-gradient(135deg,var(--amb),#d97706);color:#000;}
         .btn-amb:active{opacity:.85;}
+        .btn-amb.btn-cta{color:#fff;}
+        :root[data-theme="light"] .btn-amb.btn-cta{color:#000;}
         .btn-ghost{background:var(--ov1);border:1px solid var(--bdr2);color:var(--tx2);}
         .btn-ghost:active{background:var(--ov3);}
         .btn-ai{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;}
@@ -990,14 +1153,13 @@ export default function DashboardPage() {
         .bn-icon{font-size:20px;line-height:1;color:var(--mut);}
         .bn-lbl{font-size:10px;font-weight:600;color:var(--mut);white-space:nowrap;}
         .bn-badge{position:absolute;top:4px;right:calc(50% - 16px);background:var(--red);color:#fff;font-size:9px;font-weight:700;min-width:15px;height:15px;border-radius:8px;display:flex;align-items:center;justify-content:center;border:2px solid var(--bg);}
-        /* More menu */
-        .more-menu{position:fixed;bottom:calc(60px + env(safe-area-inset-bottom,0px) + 8px);left:50%;transform:translateX(-50%);background:var(--sur);border:1px solid var(--bdr2);border-radius:16px;padding:8px;min-width:200px;z-index:300;box-shadow:0 20px 60px rgba(0,0,0,.7);display:none;}
-        .more-menu.show{display:block;}
-        .mm-overlay{display:none;position:fixed;inset:0;z-index:299;}
-        .mm-overlay.show{display:block;}
-        .mm-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:500;color:var(--mut);transition:all .15s;border:none;background:none;width:100%;font-family:inherit;text-align:left;}
-        .mm-item:active{background:var(--ov2);color:var(--tx);}
-        .mm-item.active{background:var(--adim);color:var(--amb);}
+        /* Kira featured bottom-nav button */
+        .bn-item.bn-kira{overflow:visible;}
+        .bn-item.bn-kira .bn-icon{width:48px;height:48px;font-size:26px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#f472b6,#a855f7);border-radius:50%;box-shadow:0 6px 18px -4px rgba(168,85,247,.55);margin-top:-22px;border:3px solid var(--bg);color:#fff;}
+        .bn-item.bn-kira .bn-lbl{margin-top:-2px;}
+        .bn-item.bn-kira.active::before{display:none;}
+        .bn-item.bn-kira.active .bn-icon{box-shadow:0 6px 18px -4px rgba(168,85,247,.75),0 0 0 2px var(--amb);}
+        .bn-item.bn-kira:hover .bn-icon{transform:scale(1.08);}
         /* Toast */
         #toast{position:fixed;bottom:calc(68px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%) translateY(80px);background:var(--sur2);border:1px solid var(--bdr2);border-radius:12px;padding:11px 18px;font-size:13px;font-weight:600;box-shadow:0 8px 32px rgba(0,0,0,.5);opacity:0;transition:all .3s cubic-bezier(.16,1,.3,1);z-index:9999;white-space:nowrap;max-width:calc(100vw - 32px);}
         #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
@@ -1021,8 +1183,8 @@ export default function DashboardPage() {
         .icon-btn:active,.menu-btn:active{transform:scale(.93);}
         .av{transition:transform .2s cubic-bezier(.34,1.56,.64,1);}
         .sb-user:hover .av{transform:scale(1.08) rotate(-4deg);}
-        .sb-item,.mm-item,.sn-item,.nf{transition:transform .15s ease,background .15s ease,color .15s ease;}
-        .sb-item:hover,.mm-item:hover,.sn-item:hover,.nf:hover{transform:translateX(3px);}
+        .sb-item,.sn-item,.nf{transition:transform .15s ease,background .15s ease,color .15s ease;}
+        .sb-item:hover,.sn-item:hover,.nf:hover{transform:translateX(3px);}
         .bn-item{transition:transform .15s cubic-bezier(.34,1.56,.64,1);}
         .bn-item:hover{transform:translateY(-2px);}
         .bn-item:active{transform:scale(.92);}
@@ -1063,21 +1225,6 @@ export default function DashboardPage() {
 
       {/* Overlays */}
       <div className={`overlay${sidebarOpen?' show':''}`} onClick={()=>setSidebarOpen(false)}/>
-      <div className={`mm-overlay${moreOpen?' show':''}`} onClick={()=>setMoreOpen(false)}/>
-
-      {/* More menu */}
-      <div className={`more-menu${moreOpen?' show':''}`}>
-        {moreNav.map(item=>(
-          <button key={item.id} className={`mm-item${page===item.id?' active':''}`} onClick={()=>navTo(item.id)}>
-            <span style={{fontSize:18}}>{item.icon}</span>{item.label}
-            {item.id==='notifications'&&unreadCount>0 && <span style={{marginLeft:'auto',background:'var(--red)',color:'#fff',fontSize:10,fontWeight:700,padding:'1px 6px',borderRadius:100}}>{unreadCount}</span>}
-          </button>
-        ))}
-        <div style={{height:1,background:'var(--bdr)',margin:'6px 0'}}/>
-        <button className="mm-item" style={{color:'var(--red)'}} onClick={doLogout}>
-          <span style={{fontSize:18}}>↩</span>Logout
-        </button>
-      </div>
 
       <div className="app">
         <div className="app-inner">
@@ -1123,7 +1270,7 @@ export default function DashboardPage() {
               <div className={`dp${page==='dashboard'?' active':''}`}>
                 <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10,marginBottom:16,flexWrap:'wrap'}}>
                   <div><div style={{fontSize:12,color:'var(--mut)',marginBottom:2}}>Good morning ☀️</div><div style={{fontSize:20,fontWeight:900,letterSpacing:'-0.02em'}}>Welcome back, {userName.split(' ')[0]}</div></div>
-                  <div style={{display:'flex',gap:8}}><button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>navTo('timer')}>⏱ Start Session</button><button className="btn btn-amb" style={{fontSize:12}} onClick={()=>navTo('tasks')}>+ New Task</button></div>
+                  <div style={{display:'flex',gap:8}}><button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>navTo('timer')}>⏱ Start Session</button><button className="btn btn-amb btn-cta" style={{fontSize:12}} onClick={()=>navTo('tasks')}>+ New Task</button></div>
                 </div>
                 <div className="ai-banner">
                   <div className="ai-icon">🤖</div>
@@ -1199,22 +1346,45 @@ export default function DashboardPage() {
                     {taskError && <div style={{background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#fca5a5',marginBottom:10}}>{taskError}</div>}
                     <div style={{display:'flex',flexDirection:'column',gap:8}}>
                       <input placeholder="Task title *" value={newTask.title} onChange={e=>setNewTask(v=>({...v,title:e.target.value}))}
-                        style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:8,padding:'9px 12px',color:'var(--tx)',fontSize:13,outline:'none',width:'100%'}}/>
+                        style={taskInputStyle}/>
+                      <textarea placeholder="Description (optional)" value={newTask.description} onChange={e=>setNewTask(v=>({...v,description:e.target.value}))}
+                        rows={2} style={{...taskInputStyle,resize:'vertical'}}/>
                       <div style={{display:'flex',gap:8}}>
                         <input placeholder="Subject (optional)" value={newTask.subject} onChange={e=>setNewTask(v=>({...v,subject:e.target.value}))}
-                          style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:8,padding:'9px 12px',color:'var(--tx)',fontSize:13,outline:'none',flex:1}}/>
+                          style={{...taskInputStyle,flex:1}}/>
                         <select value={newTask.priority} onChange={e=>setNewTask(v=>({...v,priority:e.target.value as Task['priority']}))}
-                          style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:8,padding:'9px 12px',color:'var(--tx)',fontSize:13,outline:'none'}}>
+                          style={{...taskInputStyle,width:'auto'}}>
                           <option value="LOW">Low</option>
                           <option value="MEDIUM">Medium</option>
                           <option value="HIGH">High</option>
                           <option value="URGENT">Urgent</option>
                         </select>
                       </div>
-                      <input type="datetime-local" value={newTask.dueDate} onChange={e=>setNewTask(v=>({...v,dueDate:e.target.value}))}
-                        style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:8,padding:'9px 12px',color:'var(--tx)',fontSize:13,outline:'none',width:'100%'}}/>
+                      <div style={{display:'flex',gap:8}}>
+                        <input type="datetime-local" value={newTask.dueDate} onChange={e=>setNewTask(v=>({...v,dueDate:e.target.value}))}
+                          style={{...taskInputStyle,flex:1}}/>
+                        <input type="number" min={1} max={1440} placeholder="Est. minutes" value={newTask.estimatedMins} onChange={e=>setNewTask(v=>({...v,estimatedMins:e.target.value}))}
+                          style={{...taskInputStyle,width:120}}/>
+                      </div>
+                      <input placeholder="Tags (comma separated)" value={newTask.tags} onChange={e=>setNewTask(v=>({...v,tags:e.target.value}))}
+                        style={taskInputStyle}/>
+                      <div>
+                        <label className="f-label" style={{marginBottom:6}}>Subtasks (optional)</label>
+                        {newSubtasks.map((s,i)=>(
+                          <div key={i} style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
+                            <div style={{flex:1,fontSize:13,background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:8,padding:'8px 12px'}}>{s}</div>
+                            <button onClick={()=>setNewSubtasks(prev=>prev.filter((_,idx)=>idx!==i))} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'2px 4px'}} title="Remove">✕</button>
+                          </div>
+                        ))}
+                        <div style={{display:'flex',gap:8}}>
+                          <input placeholder="Add a subtask" value={newSubtaskInput} onChange={e=>setNewSubtaskInput(e.target.value)}
+                            onKeyDown={e=>{if(e.key==='Enter'&&newSubtaskInput.trim()){setNewSubtasks(prev=>[...prev,newSubtaskInput.trim()]);setNewSubtaskInput('')}}}
+                            style={{...taskInputStyle,flex:1}}/>
+                          <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>{if(newSubtaskInput.trim()){setNewSubtasks(prev=>[...prev,newSubtaskInput.trim()]);setNewSubtaskInput('')}}}>+ Add</button>
+                        </div>
+                      </div>
                       <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
-                        <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>{setShowAddTask(false);setTaskError('')}}>Cancel</button>
+                        <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>{setShowAddTask(false);setTaskError('');setNewSubtasks([]);setNewSubtaskInput('')}}>Cancel</button>
                         <button className="btn btn-amb" style={{fontSize:12}} onClick={createTask}>Create Task</button>
                       </div>
                     </div>
@@ -1241,17 +1411,21 @@ export default function DashboardPage() {
                         {col.items.map(t=>{
                           const due = formatDue(t.dueDate)
                           return (
-                            <div key={t.id} className="task-item" style={{background:'var(--bg)',...(t.status==='COMPLETED'?{opacity:.55}:{})}}>
-                              <div className={`chk${t.status==='COMPLETED'?' done':''}`} onClick={()=>toggleTask(t)}>{t.status==='COMPLETED'?'✓':''}</div>
+                            <div key={t.id} className="task-item" style={{background:'var(--bg)',alignItems:'flex-start',...(t.status==='COMPLETED'?{opacity:.55}:{})}} onClick={()=>openEditTask(t)}>
+                              <div className={`chk${t.status==='COMPLETED'?' done':''}`} style={{marginTop:1}} onClick={e=>{e.stopPropagation();toggleTask(t)}}>{t.status==='COMPLETED'?'✓':''}</div>
                               <div style={{flex:1,minWidth:0}}>
                                 <div style={{fontSize:13,fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.title}</div>
+                                {t.description && <div style={{fontSize:11,color:'var(--tx2)',marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.description}</div>}
                                 <div style={{display:'flex',gap:4,marginTop:3,flexWrap:'wrap',alignItems:'center'}}>
                                   {t.subject && <span style={{fontSize:11,background:'var(--sur2)',border:'1px solid var(--bdr)',borderRadius:4,padding:'1px 6px'}}>{t.subject}</span>}
                                   <span style={{fontSize:11,fontWeight:700,color:priorityColor(t.priority)}}>{t.priority}</span>
                                   {due && <span style={{fontSize:11,color:due.urgent?'var(--red)':'var(--mut)'}}>📅 {due.date} · {due.label}</span>}
+                                  {t.estimatedMins ? <span style={{fontSize:11,color:'var(--mut)'}}>⏱ {formatMins(t.estimatedMins)}</span> : null}
+                                  {t.subtasks.length > 0 && <span style={{fontSize:11,color:'var(--mut)'}}>☑ {t.subtasks.filter(s=>s.completed).length}/{t.subtasks.length}</span>}
+                                  {t.tags.map(tag=><span key={tag} className="badge" style={{background:'var(--ov2)',color:'var(--tx2)'}}>#{tag}</span>)}
                                 </div>
                               </div>
-                              <button onClick={()=>setDeleteConfirm({id:t.id, title:t.title})} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'2px 4px',opacity:.5}} title="Delete">✕</button>
+                              <button onClick={e=>{e.stopPropagation();setDeleteConfirm({id:t.id, title:t.title})}} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'2px 4px',opacity:.5}} title="Delete">✕</button>
                             </div>
                           )
                         })}
@@ -1286,7 +1460,7 @@ export default function DashboardPage() {
                         <div style={{fontSize:18,fontWeight:700,color:'var(--tx)'}}>Hi, I'm Kira!</div>
                         <div style={{fontSize:13,maxWidth:340}}>Your AI study companion. Ask me anything about your subjects — I'll explain concepts step by step.</div>
                         <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center',marginTop:8}}>
-                          {['Explain recursion','What is photosynthesis?','Help me understand derivatives'].map(s=>(
+                          {['Add this task','Help me time manage','Plan my study'].map(s=>(
                             <button key={s} onClick={()=>setChatInput(s)}
                               style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:100,padding:'8px 14px',color:'var(--tx2)',fontSize:12,cursor:'pointer'}}>{s}</button>
                           ))}
@@ -1780,18 +1954,77 @@ export default function DashboardPage() {
         {/* Bottom Nav */}
         <nav className="bottom-nav">
           {mainNav.map(item=>(
-            <button key={item.id} className={`bn-item${navActive(item.id)?' active':''}`} onClick={()=>navTo(item.id)}>
+            <button key={item.id} className={`bn-item${item.id==='kira'?' bn-kira':''}${navActive(item.id)?' active':''}`} onClick={()=>navTo(item.id)}>
               <div className="bn-icon">{item.icon}</div>
               <div className="bn-lbl">{item.label}</div>
               {item.badge&&<div className="bn-badge">{item.badge}</div>}
             </button>
           ))}
-          <button className={`bn-item${moreNav.some(m=>m.id===page)?' active':''}`} onClick={()=>setMoreOpen(!moreOpen)}>
-            <div className="bn-icon">⋯</div>
-            <div className="bn-lbl">More</div>
-          </button>
         </nav>
       </div>
+
+      {editingTask && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:9998,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 20px',backdropFilter:'blur(4px)'}} onClick={()=>setEditingTask(null)}>
+          <div style={{background:'var(--sur2)',border:'1px solid var(--bdr2)',borderRadius:16,padding:'24px 22px',maxWidth:460,width:'100%',maxHeight:'85vh',overflowY:'auto',boxShadow:'0 24px 64px rgba(0,0,0,.6)'}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:16,fontWeight:800,marginBottom:14}}>Edit Task</div>
+            {editError && <div style={{background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#fca5a5',marginBottom:10}}>{editError}</div>}
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              <input placeholder="Task title *" value={editForm.title} onChange={e=>setEditForm(v=>({...v,title:e.target.value}))}
+                style={taskInputStyle}/>
+              <textarea placeholder="Description (optional)" value={editForm.description} onChange={e=>setEditForm(v=>({...v,description:e.target.value}))}
+                rows={2} style={{...taskInputStyle,resize:'vertical'}}/>
+              <div style={{display:'flex',gap:8}}>
+                <input placeholder="Subject (optional)" value={editForm.subject} onChange={e=>setEditForm(v=>({...v,subject:e.target.value}))}
+                  style={{...taskInputStyle,flex:1}}/>
+                <select value={editForm.priority} onChange={e=>setEditForm(v=>({...v,priority:e.target.value as Task['priority']}))}
+                  style={{...taskInputStyle,width:'auto'}}>
+                  <option value="LOW">Low</option>
+                  <option value="MEDIUM">Medium</option>
+                  <option value="HIGH">High</option>
+                  <option value="URGENT">Urgent</option>
+                </select>
+              </div>
+              <div style={{display:'flex',gap:8}}>
+                <select value={editForm.status} onChange={e=>setEditForm(v=>({...v,status:e.target.value as Task['status']}))}
+                  style={{...taskInputStyle,flex:1}}>
+                  <option value="TODO">To Do</option>
+                  <option value="IN_PROGRESS">In Progress</option>
+                  <option value="COMPLETED">Completed</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </select>
+                <input type="number" min={1} max={1440} placeholder="Est. minutes" value={editForm.estimatedMins} onChange={e=>setEditForm(v=>({...v,estimatedMins:e.target.value}))}
+                  style={{...taskInputStyle,width:120}}/>
+              </div>
+              <input type="datetime-local" value={editForm.dueDate} onChange={e=>setEditForm(v=>({...v,dueDate:e.target.value}))}
+                style={taskInputStyle}/>
+              <input placeholder="Tags (comma separated)" value={editForm.tags} onChange={e=>setEditForm(v=>({...v,tags:e.target.value}))}
+                style={taskInputStyle}/>
+
+              <div>
+                <label className="f-label" style={{marginBottom:6}}>Subtasks</label>
+                {editingTask.subtasks.map(s=>(
+                  <div key={s.id} style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
+                    <div className={`chk${s.completed?' done':''}`} onClick={()=>toggleSubtask(editingTask.id, s)}>{s.completed?'✓':''}</div>
+                    <div style={{flex:1,fontSize:13,...(s.completed?{textDecoration:'line-through',color:'var(--mut)'}:{})}}>{s.title}</div>
+                    <button onClick={()=>deleteSubtask(editingTask.id, s.id)} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'2px 4px',opacity:.5}} title="Remove">✕</button>
+                  </div>
+                ))}
+                <div style={{display:'flex',gap:8}}>
+                  <input placeholder="Add a subtask" value={editSubtaskInput} onChange={e=>setEditSubtaskInput(e.target.value)}
+                    onKeyDown={e=>{if(e.key==='Enter'&&editSubtaskInput.trim()){addSubtask(editingTask.id, editSubtaskInput);setEditSubtaskInput('')}}}
+                    style={{...taskInputStyle,flex:1}}/>
+                  <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>{if(editSubtaskInput.trim()){addSubtask(editingTask.id, editSubtaskInput);setEditSubtaskInput('')}}}>+ Add</button>
+                </div>
+              </div>
+
+              <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:6}}>
+                <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>setEditingTask(null)}>Cancel</button>
+                <button className="btn btn-amb" style={{fontSize:12}} onClick={saveEditTask} disabled={editSaving}>{editSaving?'Saving...':'Save Changes'}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteConfirm && (
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:9998,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 20px',backdropFilter:'blur(4px)'}}>

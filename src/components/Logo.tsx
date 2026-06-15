@@ -31,7 +31,7 @@ export default function Logo({
 
   const text = (
     <div className="leading-tight">
-      <div className={`font-extrabold text-slate-100 ${textClassName}`}>
+      <div className={`font-extrabold ${textClassName}`} style={{ color: 'var(--tx, #f1f5f9)' }}>
         Kira<span className="text-amber-500">Flow</span>
       </div>
       {subtitle && <div className="text-[10px] text-slate-500">{subtitle}</div>}
