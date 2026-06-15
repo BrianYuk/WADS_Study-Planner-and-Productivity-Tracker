@@ -1,4 +1,4 @@
-# 📚 Kira Flow – Smart Productivity Tracker
+# Kira Flow – Smart Productivity Tracker
 
 > Final Project – Web Application Development and Security  
 > **Course Code:** COMP6703001  
@@ -12,7 +12,7 @@
 
 **Project Domain:** Study Planner & Productivity Tracker (Option 10)
 
-**Class:** [Your Class Code] – L4AC / L4BC / L4CC
+**Class:** L4CC
 
 **Group Members:**
 
@@ -57,8 +57,8 @@ Students frequently struggle with managing multiple academic responsibilities si
 - Goal setting and tracking
 
 **AI is used for:**
-- **Smart Task Prioritization** – AI ranks tasks by urgency, importance, and estimated effort using GPT-4o-mini
-- **Burnout & Overload Detection** – AI analyzes 7-day productivity patterns to detect stress risk and recommend schedule adjustments
+- **Smart Task Prioritization** – AI ranks tasks by urgency, importance, and estimated effort using Groq (Llama 3.3 70B)
+- **Study Q&A (Ask Kira)** – An AI chat assistant that answers students' study questions with clear, step-by-step explanations
 - **Study Schedule Optimization** – AI generates optimized weekly study plans based on available slots and workload
 
 ---
@@ -71,10 +71,10 @@ Students frequently struggle with managing multiple academic responsibilities si
 | Backend | Next.js API Routes (Node.js runtime) |
 | API | RESTful API (JSON) |
 | Database | PostgreSQL + Prisma ORM |
-| AI | OpenAI GPT-4o-mini API |
+| AI | Groq API (Llama 3.3 70B) |
 | Authentication | JWT (httpOnly cookies) + bcryptjs |
 | Containerization | Docker + Docker Compose |
-| Deployment | VPS/Cloud + Cloudflare DNS + GitHub Actions CI/CD |
+| Deployment | Docker + Docker Hub + GitHub Actions (self-hosted runner) on CS server |
 | Version Control | GitHub |
 
 **Architecture Style:** Modular Monolith — single deployable Next.js application with clear module separation (auth, tasks, sessions, goals, AI, analytics).
@@ -105,11 +105,11 @@ Students frequently struggle with managing multiple academic responsibilities si
 └──────────┬────────────────────────────────┬────────────────────┘
            │                                │
 ┌──────────▼──────────┐          ┌──────────▼──────────┐
-│   PostgreSQL DB      │          │   OpenAI API         │
-│   via Prisma ORM     │          │   (GPT-4o-mini)      │
+│   PostgreSQL DB      │          │   Groq API           │
+│   via Prisma ORM     │          │   (Llama 3.3 70B)    │
 │                      │          │                      │
 │   Users, Tasks,      │          │   Task Priority      │
-│   Sessions, Goals,   │          │   Burnout Detection  │
+│   Sessions, Goals,   │          │   Study Q&A (Kira)   │
 │   Events, AI Logs    │          │   Schedule Optimizer │
 └─────────────────────┘          └─────────────────────┘
 ```
@@ -140,10 +140,10 @@ Students frequently struggle with managing multiple academic responsibilities si
 | POST | `/api/auth/register` | Register new user | No |
 | POST | `/api/auth/login` | Login, returns JWT | No |
 | POST | `/api/auth/logout` | Clear auth cookies | Yes |
-| POST | `/api/auth/refresh` | Refresh access token | No (refresh token) |
-| GET | `/api/users/me` | Get current user profile | Yes |
-| PUT | `/api/users/me` | Update profile | Yes |
-| GET | `/api/tasks` | List tasks (paginated, filtered) | Yes |
+| GET | `/api/auth/me` | Get current authenticated user | Yes |
+| GET/POST | `/api/auth/[...nextauth]` | NextAuth.js handler (Google OAuth) | No |
+| GET | `/api/auth/oauth-bridge` | Bridges a Google session into app JWT cookies | Yes (NextAuth session) |
+| GET | `/api/tasks` | List tasks (filtered) | Yes |
 | POST | `/api/tasks` | Create new task | Yes |
 | GET | `/api/tasks/:id` | Get single task | Yes |
 | PUT | `/api/tasks/:id` | Update task | Yes |
@@ -154,16 +154,12 @@ Students frequently struggle with managing multiple academic responsibilities si
 | GET | `/api/goals` | List goals | Yes |
 | POST | `/api/goals` | Create goal | Yes |
 | PUT | `/api/goals/:id` | Update goal progress | Yes |
-| GET | `/api/calendar/events` | Get calendar events | Yes |
-| POST | `/api/calendar/events` | Create event | Yes |
-| GET | `/api/analytics/dashboard` | Dashboard summary data | Yes |
-| GET | `/api/analytics/productivity` | Detailed productivity stats | Yes |
+| GET | `/api/analytics/dashboard` | Dashboard summary + analytics data | Yes |
 | GET | `/api/notifications` | Get notifications | Yes |
 | PATCH | `/api/notifications` | Mark all as read | Yes |
 | POST | `/api/ai/prioritize` | AI task prioritization | Yes |
-| GET | `/api/ai/burnout` | AI burnout risk analysis | Yes |
-| POST | `/api/ai/schedule` | AI schedule optimization | Yes |
-| GET | `/api/admin/users` | List all users (admin) | Yes + ADMIN role |
+| POST | `/api/ai/chat` | AI study Q&A chat (Ask Kira) | Yes |
+| GET | `/api/health` | Health check (app + database status) | No |
 
 ### 6.2 API Documentation
 - Swagger/OpenAPI documentation: Available at `/api/docs` (Week 5 deliverable)
@@ -218,8 +214,8 @@ Full schema available in `prisma/schema.prisma`.
 
 | AI Feature | Purpose | AI Type |
 |-----------|---------|---------|
-| Smart Task Prioritization | Ranks tasks by urgency + importance + effort using GPT-4o-mini | NLP / LLM |
-| Burnout & Overload Detection | Analyzes 7-day productivity patterns, gives risk score + recommendations | NLP / Pattern Analysis |
+| Smart Task Prioritization | Ranks tasks by urgency + importance + effort using Groq (Llama 3.3 70B) | NLP / LLM |
+| Study Q&A (Ask Kira) | Answers study questions with step-by-step explanations, keeps short conversation history | NLP / LLM |
 | Study Schedule Optimizer | Generates optimized weekly study plan from tasks + available time slots | LLM / Recommendation |
 
 ### 8.2 AI Integration Flow
@@ -227,25 +223,25 @@ Full schema available in `prisma/schema.prisma`.
 **Task Prioritization:**
 ```
 User's pending tasks (title, subject, priority, dueDate, estimatedMins)
-    → Structured prompt to GPT-4o-mini (temperature 0.3)
+    → Structured prompt to Groq Llama 3.3 70B (temperature 0.3)
     → JSON response: [{taskId, aiScore 0-1, reasoning, suggestedOrder}]
     → aiScore saved to tasks.aiPriority column
     → Tasks re-ordered by aiScore in dashboard
     → AI request logged to AIAnalysis table for audit
 ```
 
-**Burnout Detection:**
+**Study Q&A (Ask Kira):**
 ```
 Last 7 days: daily study hours + completed tasks + focus scores
     + total pending tasks + overdue count
-    → Structured prompt to GPT-4o-mini (temperature 0.4)
+    → Structured prompt to Groq Llama 3.3 70B (temperature 0.7)
     → JSON: {riskLevel, score, insights[], recommendations[], scheduleAdjustments[]}
     → Displayed as wellness card on dashboard
     → CRITICAL risk triggers SYSTEM notification
     → Logged to AIAnalysis for history
 ```
 
-**Failure handling:** All AI calls wrapped in try/catch with graceful fallbacks — task prioritization falls back to due-date ordering, burnout detection returns LOW risk with "unavailable" message.
+**Failure handling:** All AI calls wrapped in try/catch with graceful fallbacks — task prioritization falls back to due-date ordering, study Q&A returns a friendly "temporarily unavailable" message.
 
 ---
 
@@ -253,7 +249,7 @@ Last 7 days: daily study hours + completed tasks + focus scores
 
 | Security Concern | Implementation |
 |----------------|---------------|
-| Authentication | JWT access tokens (15min expiry) + refresh tokens (7 days), stored in httpOnly cookies to prevent XSS access |
+| Authentication | JWT access tokens stored in httpOnly cookies (prevents XSS access), plus Google OAuth via NextAuth.js bridged into the same JWT session | 
 | Authorization | Role-based: STUDENT vs ADMIN. Admin routes protected by `withAdminAuth()` middleware |
 | Input Validation | Zod schema validation on all API endpoints; rejects malformed data before DB queries |
 | Output Sanitization | `sanitizeInput()` escapes HTML entities on all user-provided strings |
@@ -261,7 +257,7 @@ Last 7 days: daily study hours + completed tasks + focus scores
 | XSS Prevention | Content Security Policy headers, input sanitization, httpOnly cookies |
 | CSRF Protection | SameSite=Strict cookies, CSRF token on state-changing requests |
 | Rate Limiting | Per-user rate limits: 100 req/15min general, 20 req/hr for AI endpoints, 5 req/hr for registration |
-| Secure API Keys | OpenAI key and JWT secret stored only in environment variables, never committed |
+| Secure API Keys | Groq key and JWT secret stored only in environment variables, never committed |
 | Security Headers | `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy` on all responses |
 
 ---
@@ -320,7 +316,7 @@ Last 7 days: daily study hours + completed tasks + focus scores
 - Timeout (>30s) → same fallback triggered by catch block
 - Malformed response → JSON.parse error caught, fallback returned
 
-**AI Feature: Burnout Detection**
+**AI Feature: Study Q&A (Ask Kira)**
 
 | Test Case | Input | Expected Output | Actual Result | Status |
 |-----------|-------|-----------------|---------------|--------|
@@ -359,13 +355,16 @@ NODE_ENV           – "production" in deployment
 
 **Secrets handling:** All secrets injected via environment variables. `.env` file is in `.gitignore`. GitHub Actions uses repository secrets for CI/CD pipeline.
 
-**HTTPS:** Cloudflare proxies the domain with automatic SSL termination. Backend uses `secure: true` on cookies in production.
+**HTTPS:** The CS server reverse-proxies the domain with SSL termination. Backend uses `secure: true` on cookies in production.
 
 ### 11.3 Live Application URL
 
 ```
-https://studyplanner.yourdomain.com
+https://e2526-wads-b4cc-05.csbihub.id
 ```
+
+The application is deployed on the BINUS CS server and is accessible over HTTPS. Both
+email/password (JWT) and Google sign-in (OAuth) authentication work on the live site.
 
 ---
 
@@ -378,7 +377,7 @@ https://studyplanner.yourdomain.com
 - API endpoints handled: GET/POST /api/tasks, GET /api/analytics/dashboard
 - Tests written: FE-01 to FE-05 (frontend tests)
 - Security work: Input validation on frontend forms
-- AI-related work: AI prioritization UI, burnout risk card component
+- AI-related work: AI prioritization UI, Ask Kira chat component
 
 **Student Name: [Member 2]**
 - Features implemented: All API routes, Prisma schema, business logic
@@ -402,18 +401,18 @@ https://studyplanner.yourdomain.com
 |---------|---------|---------------|
 | ChatGPT (GPT-4) | Boilerplate generation, debugging assistance | Initial API route structure, Prisma schema drafts |
 | GitHub Copilot | In-editor code suggestions | Component scaffolding, test case generation |
-| OpenAI API (GPT-4o-mini) | Application AI feature | Task prioritization, burnout detection, schedule optimization |
+| Groq API (Llama 3.3 70B) | Application AI feature | Task prioritization, study Q&A, schedule optimization |
 
-> "ChatGPT was used to assist with initial API structure and Prisma schema design. GitHub Copilot provided suggestions during development. All generated code was reviewed, modified, tested, and fully understood by each team member. The OpenAI API is integrated as a core application feature with full testing coverage."
+> "ChatGPT was used to assist with initial API structure and Prisma schema design. GitHub Copilot provided suggestions during development. All generated code was reviewed, modified, tested, and fully understood by each team member. The Groq API (Llama 3.3 70B) is integrated as a core application feature with full testing coverage."
 
 ---
 
 ## 14. Known Limitations & Future Improvements
 
 **Current limitations:**
-- AI rate limits: 20 AI requests/hour per user (OpenAI cost control)
+- AI rate limits: 20 AI requests/hour per user (cost control)
 - Schedule optimizer doesn't integrate with external calendars (Google Calendar) yet
-- Burnout detection is based on self-reported focus scores (subjective data)
+- Study Q&A is a study aid; it guides understanding rather than replacing coursework
 
 **Future improvements:**
 - Google Calendar OAuth integration
@@ -423,8 +422,8 @@ https://studyplanner.yourdomain.com
 - Custom AI fine-tuning on student behavior data (with consent)
 
 **AI limitations and risks:**
-- GPT-4o-mini may occasionally misrank tasks — always presented as suggestion, not mandate
-- Burnout analysis is advisory only and not a medical assessment
+- Llama 3.3 70B may occasionally misrank tasks — always presented as suggestion, not mandate
+- AI study answers are advisory and should be verified against course materials
 - Prompt injection is mitigated but not 100% preventable — all AI outputs are treated as untrusted
 
 ---
@@ -448,7 +447,7 @@ We declare that:
 ### Prerequisites
 - Node.js 20+
 - PostgreSQL 16+ (or Docker)
-- OpenAI API key
+- Groq API key
 
 ### Local Development
 
@@ -504,7 +503,7 @@ docker compose logs app
 
 ### GitHub Actions
 Add these secrets to your GitHub repository:
-- `DEPLOY_HOST` — your server IP
+- `DEPLOY_HOST` — https://e2526-wads-b4cc-05.csbihub.id
 - `DEPLOY_USER` — SSH username
 - `DEPLOY_SSH_KEY` — private SSH key
 - `CODECOV_TOKEN` — optional coverage reporting
@@ -515,20 +514,16 @@ Add these secrets to your GitHub repository:
 
 | Week | Deliverable | Status |
 |------|------------|--------|
-| 1 | Architecture, tech stack, project selection | ✅ Complete |
-| 2 | USR (User Persona, User Journey) + SRS | ✅ Complete |
-| 3 | Mockup Design + Routing Design | ✅ Complete |
-| 4 | Frontend Testing | 🔄 In Progress |
-| 5 | API Documentation (Swagger) | 📋 Planned |
-| 6 | API Testing Results (Postman) | 📋 Planned |
-| 7 | DB Schema and ORM | 📋 Planned |
-| 8 | Auth and Authorization | 📋 Planned |
-| 9 | Web Security + Security Testing | 📋 Planned |
-| 10 | Docker + CI/CD + Deployment | 📋 Planned |
-| 11 | AI Design + Testing | 📋 Planned |
-| 12 | Final Project Submission | 📋 Planned |
-| 13 | Final Demo & Presentation | 📋 Planned |
-
----
-
-*Last updated: Week 3*
+| 1 | Architecture, tech stack, project selection | Complete |
+| 2 | USR (User Persona, User Journey) + SRS | Complete |
+| 3 | Mockup Design + Routing Design | Complete |
+| 4 | Frontend Testing | Complete |
+| 5 | API Documentation (Swagger) | Complete |
+| 6 | API Testing Results (Postman) | Complete |
+| 7 | DB Schema and ORM | Complete |
+| 8 | Auth and Authorization | Complete |
+| 9 | Web Security + Security Testing | Complete |
+| 10 | Docker + CI/CD + Deployment | Complete |
+| 11 | AI Design + Testing | Complete |
+| 12 | Final Project Submission | Complete |
+| 13 | Final Demo & Presentation | In Progress |
