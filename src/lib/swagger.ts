@@ -13,7 +13,7 @@ export const swaggerSpec = {
     { name: 'Goals', description: 'Set and track study goals' },
     { name: 'Notifications', description: 'View and manage notifications' },
     { name: 'Analytics', description: 'Dashboard analytics and insights' },
-    { name: 'AI', description: 'AI-powered prioritization and burnout detection' },
+    { name: 'AI', description: 'AI-powered task prioritization and study Q&A (Ask Kira)' },
   ],
   components: {
     securitySchemes: {
@@ -497,37 +497,55 @@ export const swaggerSpec = {
         },
       },
     },
-    '/api/ai/burnout': {
-      get: {
+    '/api/ai/chat': {
+      post: {
         tags: ['AI'],
-        summary: 'AI burnout risk analysis based on 7-day study patterns',
+        summary: 'AI study Q&A chat (Ask Kira) — answers study questions with step-by-step explanations',
         security: [{ cookieAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['question'],
+                properties: {
+                  question: { type: 'string', example: 'Can you explain recursion with an example?' },
+                  subject: { type: 'string', example: 'Programming' },
+                  history: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        role: { type: 'string', enum: ['user', 'assistant'] },
+                        content: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
         responses: {
           200: {
-            description: 'Burnout risk analysis',
+            description: 'AI answer',
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
                   properties: {
-                    analysis: {
-                      type: 'object',
-                      properties: {
-                        riskLevel: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] },
-                        score: { type: 'integer', example: 42 },
-                        insights: { type: 'array', items: { type: 'string' } },
-                        recommendations: { type: 'array', items: { type: 'string' } },
-                        scheduleAdjustments: { type: 'array', items: { type: 'string' } },
-                      },
-                    },
-                    generatedAt: { type: 'string', format: 'date-time' },
+                    answer: { type: 'string' },
+                    subject: { type: 'string' },
+                    tokensUsed: { type: 'integer', example: 320 },
+                    latencyMs: { type: 'integer', example: 850 },
                   },
                 },
               },
             },
           },
           401: { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
-          429: { description: 'Rate limit exceeded (10 req/hr)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          429: { description: 'Rate limit exceeded (20 req/hr)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },
