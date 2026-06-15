@@ -10,8 +10,10 @@
 # ── Stage 1: Base ────────────────────────────────────────────────────────────
 FROM node:20-alpine AS base
 WORKDIR /app
-# libc6-compat needed for some native Node.js modules on Alpine
-RUN apk add --no-cache libc6-compat
+# libc6-compat for native Node modules; openssl is REQUIRED by the Prisma
+# query engine on Alpine (musl). Without it Prisma fails at runtime with
+# "Error loading shared library libssl.so.*".
+RUN apk add --no-cache libc6-compat openssl
 
 # ── Stage 2: Install Dependencies ────────────────────────────────────────────
 FROM base AS deps
