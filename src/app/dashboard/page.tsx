@@ -46,7 +46,12 @@ type StudySessionItem = {
 
 const sessionIcons: Record<string,string> = { POMODORO:'🍅', DEEP_WORK:'🧠', REVIEW:'📖', PRACTICE:'✏️', READING:'📚' }
 
-type Page = 'dashboard'|'tasks'|'kira'|'timer'|'calendar'|'goals'|'analytics'|'notifications'|'settings'
+const accentPalettes: Record<'dark'|'light', string[]> = {
+  dark:  ['#f59e0b','#6366f1','#10b981','#ef4444','#8b5cf6'],
+  light: ['#d97706','#4f46e5','#059669','#dc2626','#7c3aed'],
+}
+
+type Page = 'dashboard'|'tasks'|'kira'|'timer'|'calendar'|'calendarDay'|'goals'|'analytics'|'notifications'|'settings'
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -78,14 +83,11 @@ export default function DashboardPage() {
   const [userSettings, setUserSettings] = useState({
     dailyGoalHours: '4',
     accentColor: '#f59e0b',
-    notifTaskReminders: true,
-    notifAiInsights: true,
-    notifSessionPrompts: true,
-    notifAchievements: false,
+    theme: 'dark' as 'dark'|'light',
     timerAutoStart: true,
     timerSound: true,
     timerLongBreak: false,
-  })  
+  })
   const timerRef = useRef<ReturnType<typeof setInterval>|null>(null)
 
   // ── Real API state ──────────────────────────────────────────────
@@ -97,6 +99,10 @@ export default function DashboardPage() {
   const [aiPrioritizing, setAiPrioritizing] = useState(false)
   const [userName, setUserName] = useState('Student')
   const [userEmail, setUserEmail] = useState('')
+  // Profile editing
+  const [editingProfile, setEditingProfile] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [profileSaving, setProfileSaving] = useState(false)
   // Kira AI Chat state
   const [chatMessages, setChatMessages] = useState<{role:'user'|'assistant',content:string}[]>([])
   const [chatInput, setChatInput] = useState('')
@@ -128,8 +134,12 @@ export default function DashboardPage() {
   // Calendar
   const [calendarView, setCalendarView] = useState<'month'|'week'|'year'>('month')
   const [calendarDate, setCalendarDate] = useState(() => { const d = new Date(); d.setHours(0,0,0,0); return d })
+  const [selectedDate, setSelectedDate] = useState(() => { const d = new Date(); d.setHours(0,0,0,0); return d })
+  const [dayNewTitle, setDayNewTitle] = useState('')
+  const [dayNewPriority, setDayNewPriority] = useState<Task['priority']>('MEDIUM')
+  const [dayTaskError, setDayTaskError] = useState('')
 
-  const titles: Record<Page,string> = {dashboard:'Dashboard',tasks:'Tasks',kira:'Ask Kira',timer:'Study Timer',calendar:'Calendar',goals:'Goals',analytics:'Analytics',notifications:'Notifications',settings:'Settings'}
+  const titles: Record<Page,string> = {dashboard:'Dashboard',tasks:'Tasks',kira:'Ask Kira',timer:'Study Timer',calendar:'Calendar',calendarDay:'Day Planner',goals:'Goals',analytics:'Analytics',notifications:'Notifications',settings:'Settings'}
   const mainNav: {id:Page,icon:string,label:string,badge?:string}[] = [
     {id:'dashboard',icon:'🏠',label:'Dashboard'},
     {id:'tasks',icon:'✅',label:'Tasks',badge:'4'},
@@ -145,6 +155,41 @@ export default function DashboardPage() {
   ]
 
   function navTo(p: Page) { setPage(p); setSidebarOpen(false); setMoreOpen(false) }
+  function navActive(p: Page) { return page === p || (p === 'calendar' && page === 'calendarDay') }
+
+  // ── Calendar day view ────────────────────────────────────────
+  function openDay(date: Date) {
+    const d = new Date(date)
+    d.setHours(0,0,0,0)
+    setSelectedDate(d)
+    setDayTaskError('')
+    navTo('calendarDay')
+  }
+
+  async function createTaskForDay() {
+    if (!dayNewTitle.trim()) { setDayTaskError('Title is required'); return }
+    setDayTaskError('')
+    const due = new Date(selectedDate)
+    due.setHours(23,59,0,0)
+    try {
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: dayNewTitle.trim(), priority: dayNewPriority, dueDate: due.toISOString() }),
+      })
+      if (res.ok) {
+        setDayNewTitle('')
+        setDayNewPriority('MEDIUM')
+        showToast('✅ Task added!')
+        fetchTasks()
+      } else {
+        const err = await res.json()
+        setDayTaskError(err.error || 'Failed to create task')
+      }
+    } catch {
+      setDayTaskError('Network error')
+    }
+  }
 
   function formatTime(s: number) {
     const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60
@@ -226,6 +271,41 @@ export default function DashboardPage() {
     fetchUser()
   }, [fetchTasks, fetchUser])
 
+  // ── Logout ────────────────────────────────────────────────────
+  async function doLogout() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' })
+    } catch {}
+    router.push('/login')
+  }
+
+  // ── Save profile (syncs to DB) ──────────────────────────────────
+  async function saveProfile() {
+    const name = editName.trim()
+    if (name.length < 2) { showToast('⚠️ Name must be at least 2 characters'); return }
+    setProfileSaving(true)
+    try {
+      const res = await fetch('/api/auth/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setUserName(data.user.name)
+        setEditingProfile(false)
+        showToast('✅ Profile updated!')
+      } else {
+        const err = await res.json()
+        showToast(err.error || '⚠️ Failed to update profile')
+      }
+    } catch {
+      showToast('⚠️ Network error')
+    } finally {
+      setProfileSaving(false)
+    }
+  }
+
   // ── Create task ───────────────────────────────────────────────
   async function createTask() {
     if (!newTask.title.trim()) { setTaskError('Title is required'); return }
@@ -259,20 +339,29 @@ export default function DashboardPage() {
 
   // ── Toggle task complete ──────────────────────────────────────
   async function toggleTask(task: Task) {
-    const newStatus = task.status === 'COMPLETED' ? 'TODO' : 'COMPLETED'
+    const prevStatus = task.status
+    const newStatus = prevStatus === 'COMPLETED' ? 'TODO' : 'COMPLETED'
+
+    // Optimistic update — flip the checkbox instantly, sync to server in background
+    setTasks((prev:Task[]) => prev.map((t:Task) => t.id === task.id ? { ...t, status: newStatus } : t))
+    if (newStatus === 'COMPLETED') showToast('✅ Task complete!')
+
     try {
       const res = await fetch(`/api/tasks/${task.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       })
-      if (res.ok) {
-        setTasks((prev:Task[]) => prev.map((t:Task) => t.id === task.id ? { ...t, status: newStatus } : t))
-        if (newStatus === 'COMPLETED') 
-          showToast('✅ Task complete!')
-          await updateGoalsOnTaskComplete()
+      if (!res.ok) {
+        setTasks((prev:Task[]) => prev.map((t:Task) => t.id === task.id ? { ...t, status: prevStatus } : t))
+        showToast('⚠️ Could not update task')
+        return
       }
-    } catch {}
+      if (newStatus === 'COMPLETED') await updateGoalsOnTaskComplete()
+    } catch {
+      setTasks((prev:Task[]) => prev.map((t:Task) => t.id === task.id ? { ...t, status: prevStatus } : t))
+      showToast('⚠️ Network error')
+    }
   }
 
   // ── Delete task ───────────────────────────────────────────────
@@ -559,6 +648,10 @@ export default function DashboardPage() {
       if (res.ok) {
         const data = await res.json()
         setChatMessages([...newHistory, { role: 'assistant', content: data.answer }])
+        if (data.taskCreated) {
+          fetchTasks()
+          showToast('✅ Task created!')
+        }
       } else {
         setChatMessages([...newHistory, { role: 'assistant', content: 'Sorry, I had trouble answering. Please try again.' }])
       }
@@ -574,6 +667,8 @@ export default function DashboardPage() {
   const todoTasks       = tasks.filter(t => t.status === 'TODO')
   const inProgressTasks = tasks.filter(t => t.status === 'IN_PROGRESS')
   const doneTasks       = tasks.filter(t => t.status === 'COMPLETED')
+  const dayTasks        = tasks.filter(t => t.dueDate && new Date(t.dueDate).toDateString() === selectedDate.toDateString())
+  const todayLabel      = new Date().toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short', year:'numeric' })
 
   function priorityColor(p: string) {
     if (p === 'URGENT') return '#ef4444'
@@ -587,10 +682,11 @@ export default function DashboardPage() {
     const due = new Date(dateStr)
     const now = new Date()
     const diff = Math.ceil((due.getTime() - now.getTime()) / 86400000)
-    if (diff < 0)  return { label: `${Math.abs(diff)}d overdue`, urgent: true }
-    if (diff === 0) return { label: 'Due today', urgent: true }
-    if (diff === 1) return { label: 'Due tomorrow', urgent: true }
-    return { label: `${diff} days`, urgent: false }
+    const date = due.toLocaleDateString('en-US', { month:'short', day:'numeric', ...(due.getFullYear()!==now.getFullYear() ? {year:'numeric'} : {}) })
+    if (diff < 0)  return { label: `${Math.abs(diff)}d overdue`, date, urgent: true }
+    if (diff === 0) return { label: 'Due today', date, urgent: true }
+    if (diff === 1) return { label: 'Due tomorrow', date, urgent: true }
+    return { label: `${diff} days`, date, urgent: false }
   }
 
   // ── Calendar ──────────────────────────────────────────────────
@@ -667,18 +763,32 @@ export default function DashboardPage() {
       if (d.studyMins < 120) return 3
       return 4
     })
-    return [...Array(Math.max(0, 28 - levels.length)).fill(0), ...levels]
+    const padded = [...Array(Math.max(0, 28 - levels.length)).fill(0), ...levels]
+    const today = new Date(); today.setHours(0,0,0,0)
+    return padded.map((level,i) => {
+      const date = new Date(today)
+      date.setDate(date.getDate() - (padded.length - 1 - i))
+      return { level, date }
+    })
   })()
+  const heatDayLabels = heatData.slice(-7).map(d => d.date.toLocaleDateString('en-US',{weekday:'short'}))
 
   // ── Settings ──────────────────────────────────────────────────
   async function saveSettings(patch: Partial<typeof userSettings>) {
     const updated = { ...userSettings, ...patch }
-    setUserSettings(updated)
     setSettingsLoading(true)
-    if (patch.accentColor) {
-      document.documentElement.style.setProperty('--amb', patch.accentColor)
-      document.documentElement.style.setProperty('--adim', patch.accentColor + '20')
+
+    if (patch.theme && patch.theme !== userSettings.theme) {
+      const idx = accentPalettes[userSettings.theme].indexOf(userSettings.accentColor)
+      updated.accentColor = accentPalettes[patch.theme][idx >= 0 ? idx : 0]
+      document.documentElement.setAttribute('data-theme', patch.theme)
     }
+    if (patch.accentColor || patch.theme) {
+      document.documentElement.style.setProperty('--amb', updated.accentColor)
+      document.documentElement.style.setProperty('--adim', updated.accentColor + '20')
+    }
+
+    setUserSettings(updated)
 
     try {
       localStorage.setItem('studySettings', JSON.stringify(updated))
@@ -691,11 +801,19 @@ export default function DashboardPage() {
       setSettingsLoading(false)
     }
   }
-  
+
   useEffect(() => {
     try {
       const saved = localStorage.getItem('studySettings')
-      if (saved) setUserSettings(JSON.parse(saved))
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        setUserSettings(s => ({ ...s, ...parsed }))
+        if (parsed.theme) document.documentElement.setAttribute('data-theme', parsed.theme)
+        if (parsed.accentColor) {
+          document.documentElement.style.setProperty('--amb', parsed.accentColor)
+          document.documentElement.style.setProperty('--adim', parsed.accentColor + '20')
+        }
+      }
     } catch {}
   }, [])
 
@@ -706,7 +824,8 @@ export default function DashboardPage() {
       <style dangerouslySetInnerHTML={{__html: `
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&family=DM+Mono:wght@400;500&display=swap');
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-        :root{--bg:#090b12;--sur:#111420;--sur2:#161927;--bdr:rgba(255,255,255,.08);--bdr2:rgba(255,255,255,.12);--amb:#f59e0b;--adim:rgba(245,158,11,.12);--grn:#10b981;--red:#ef4444;--blu:#6366f1;--pur:#8b5cf6;--tx:#f1f5f9;--tx2:#94a3b8;--mut:#475569;--r:14px;--sb:228px;--tb:56px;--bn:60px;}
+        :root{--bg:#090b12;--sur:#111420;--sur2:#161927;--bdr:rgba(255,255,255,.08);--bdr2:rgba(255,255,255,.12);--amb:#f59e0b;--adim:rgba(245,158,11,.12);--grn:#10b981;--red:#ef4444;--blu:#6366f1;--pur:#8b5cf6;--tx:#f1f5f9;--tx2:#94a3b8;--mut:#475569;--ov1:rgba(255,255,255,.05);--ov2:rgba(255,255,255,.06);--ov3:rgba(255,255,255,.09);--ov4:rgba(255,255,255,.12);--hovbg:#1a1e30;--r:14px;--sb:228px;--tb:56px;--bn:60px;}
+        :root[data-theme="light"]{--bg:#eef1f6;--sur:#ffffff;--sur2:#f5f7fb;--bdr:rgba(0,0,0,.08);--bdr2:rgba(0,0,0,.12);--tx:#0f172a;--tx2:#475569;--mut:#94a3b8;--ov1:rgba(0,0,0,.04);--ov2:rgba(0,0,0,.05);--ov3:rgba(0,0,0,.07);--ov4:rgba(0,0,0,.1);--hovbg:#e7ebf2;}
         body{background:var(--bg);color:var(--tx);font-family:'DM Sans',sans-serif;font-size:14px;height:100vh;overflow:hidden;-webkit-tap-highlight-color:transparent;}
         .app{display:flex;flex-direction:column;height:100vh;height:100dvh;}
         .app-inner{display:flex;flex:1;overflow:hidden;}
@@ -716,7 +835,7 @@ export default function DashboardPage() {
         .sb-nav{flex:1;overflow-y:auto;padding:8px 6px;}
         .sb-sec{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);padding:9px 10px 4px;}
         .sb-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;cursor:pointer;transition:all .15s;color:var(--mut);font-weight:500;font-size:13px;position:relative;user-select:none;margin-bottom:1px;border:none;background:none;width:100%;text-align:left;font-family:inherit;}
-        .sb-item:hover{background:rgba(255,255,255,.05);color:var(--tx2);}
+        .sb-item:hover{background:var(--ov1);color:var(--tx2);}
         .sb-item.active{background:var(--adim);color:var(--amb);font-weight:600;}
         .sb-item.active::before{content:'';position:absolute;left:0;top:20%;bottom:20%;width:3px;background:var(--amb);border-radius:0 3px 3px 0;}
         .sb-icon{font-size:15px;width:20px;text-align:center;flex-shrink:0;}
@@ -724,7 +843,7 @@ export default function DashboardPage() {
         .sb-badge-red{background:var(--red);color:#fff;}
         .sb-badge-amb{background:var(--amb);color:#000;}
         .sb-user{padding:11px 10px;border-top:1px solid var(--bdr);display:flex;align-items:center;gap:10px;cursor:pointer;flex-shrink:0;border:none;background:none;width:100%;font-family:inherit;}
-        .sb-user:hover{background:rgba(255,255,255,.04);}
+        .sb-user:hover{background:var(--ov1);}
         .av{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#d97706);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:#000;flex-shrink:0;}
         .sb-uname{font-size:13px;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
         .sb-urole{font-size:11px;color:var(--mut);}
@@ -736,11 +855,11 @@ export default function DashboardPage() {
         .topbar{height:var(--tb);border-bottom:1px solid var(--bdr);display:flex;align-items:center;justify-content:space-between;padding:0 16px;flex-shrink:0;background:var(--sur);}
         .tb-left{display:flex;align-items:center;gap:10px;}
         .tb-title{font-size:16px;font-weight:800;letter-spacing:-0.02em;}
-        .menu-btn{width:34px;height:34px;background:rgba(255,255,255,.05);border:1px solid var(--bdr2);border-radius:9px;display:none;align-items:center;justify-content:center;cursor:pointer;font-size:16px;border:1px solid var(--bdr2);}
+        .menu-btn{width:34px;height:34px;background:var(--ov1);border:1px solid var(--bdr2);border-radius:9px;display:none;align-items:center;justify-content:center;cursor:pointer;font-size:16px;border:1px solid var(--bdr2);}
         .tb-right{display:flex;align-items:center;gap:8px;}
-        .icon-btn{position:relative;width:34px;height:34px;background:rgba(255,255,255,.05);border:1px solid var(--bdr2);border-radius:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px;}
+        .icon-btn{position:relative;width:34px;height:34px;background:var(--ov1);border:1px solid var(--bdr2);border-radius:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px;}
         .notif-dot{position:absolute;top:5px;right:5px;width:8px;height:8px;background:var(--red);border-radius:50%;border:2px solid var(--sur);}
-        .tb-date{font-size:11px;font-weight:600;background:rgba(255,255,255,.05);border:1px solid var(--bdr2);border-radius:8px;padding:6px 11px;color:var(--tx2);}
+        .tb-date{font-size:11px;font-weight:600;background:var(--ov1);border:1px solid var(--bdr2);border-radius:8px;padding:6px 11px;color:var(--tx2);}
         /* Content */
         .main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;}
         .content{flex:1;overflow-y:auto;padding:18px 16px 90px;}
@@ -761,7 +880,7 @@ export default function DashboardPage() {
         .delta{font-size:10px;margin-top:4px;display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:100px;font-weight:600;}
         .up{background:rgba(16,185,129,.12);color:var(--grn);}
         .dn{background:rgba(239,68,68,.12);color:var(--red);}
-        .pt{height:5px;background:rgba(255,255,255,.06);border-radius:100px;overflow:hidden;}
+        .pt{height:5px;background:var(--ov2);border-radius:100px;overflow:hidden;}
         .pf{height:100%;border-radius:100px;transition:width .6s ease;}
         /* Badges */
         .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:100px;white-space:nowrap;}
@@ -778,8 +897,8 @@ export default function DashboardPage() {
         .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 14px;border-radius:9px;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;transition:all .15s;white-space:nowrap;}
         .btn-amb{background:linear-gradient(135deg,var(--amb),#d97706);color:#000;}
         .btn-amb:active{opacity:.85;}
-        .btn-ghost{background:rgba(255,255,255,.05);border:1px solid var(--bdr2);color:var(--tx2);}
-        .btn-ghost:active{background:rgba(255,255,255,.09);}
+        .btn-ghost{background:var(--ov1);border:1px solid var(--bdr2);color:var(--tx2);}
+        .btn-ghost:active{background:var(--ov3);}
         .btn-ai{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;}
         .btn-red{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.25);color:#fca5a5;}
         /* Custom timer setup */
@@ -809,12 +928,14 @@ export default function DashboardPage() {
         .bar{width:100%;border-radius:3px 3px 0 0;min-height:3px;}
         .blbl{font-size:9px;color:var(--mut);font-family:'DM Mono',monospace;}
         /* Heatmap */
+        .heatmap-days{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:4px;}
+        .hm-lbl{font-size:9px;font-weight:700;color:var(--mut);text-align:center;font-family:'DM Mono',monospace;text-transform:uppercase;}
         .heatmap{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
-        .hm-c{aspect-ratio:1;border-radius:3px;}
+        .hm-c{aspect-ratio:1;border-radius:3px;cursor:default;}
         /* Toggle */
         .toggle{position:relative;width:40px;height:22px;flex-shrink:0;}
         .toggle input{opacity:0;width:0;height:0;}
-        .tslider{position:absolute;inset:0;background:rgba(255,255,255,.1);border-radius:100px;cursor:pointer;transition:.25s;}
+        .tslider{position:absolute;inset:0;background:var(--ov3);border-radius:100px;cursor:pointer;transition:.25s;}
         .tslider::before{content:'';position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;left:3px;top:3px;transition:.25s;}
         .toggle input:checked+.tslider{background:var(--amb);}
         .toggle input:checked+.tslider::before{transform:translateX(18px);}
@@ -863,7 +984,7 @@ export default function DashboardPage() {
         /* Bottom nav */
         .bottom-nav{display:none;position:fixed;bottom:0;left:0;right:0;height:calc(60px + env(safe-area-inset-bottom,0px));padding-bottom:env(safe-area-inset-bottom,0px);background:rgba(17,20,32,.96);backdrop-filter:blur(20px);border-top:1px solid var(--bdr);z-index:200;justify-content:space-around;align-items:center;}
         .bn-item{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 10px;cursor:pointer;flex:1;min-width:0;position:relative;transition:all .15s;border-radius:10px;border:none;background:none;font-family:inherit;}
-        .bn-item:active{background:rgba(255,255,255,.06);}
+        .bn-item:active{background:var(--ov2);}
         .bn-item.active .bn-icon,.bn-item.active .bn-lbl{color:var(--amb);}
         .bn-item.active::before{content:'';position:absolute;top:0;left:25%;right:25%;height:2px;background:var(--amb);border-radius:0 0 3px 3px;}
         .bn-icon{font-size:20px;line-height:1;color:var(--mut);}
@@ -875,11 +996,50 @@ export default function DashboardPage() {
         .mm-overlay{display:none;position:fixed;inset:0;z-index:299;}
         .mm-overlay.show{display:block;}
         .mm-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:500;color:var(--mut);transition:all .15s;border:none;background:none;width:100%;font-family:inherit;text-align:left;}
-        .mm-item:active{background:rgba(255,255,255,.06);color:var(--tx);}
+        .mm-item:active{background:var(--ov2);color:var(--tx);}
         .mm-item.active{background:var(--adim);color:var(--amb);}
         /* Toast */
         #toast{position:fixed;bottom:calc(68px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%) translateY(80px);background:var(--sur2);border:1px solid var(--bdr2);border-radius:12px;padding:11px 18px;font-size:13px;font-weight:600;box-shadow:0 8px 32px rgba(0,0,0,.5);opacity:0;transition:all .3s cubic-bezier(.16,1,.3,1);z-index:9999;white-space:nowrap;max-width:calc(100vw - 32px);}
         #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+        /* ── Interactive polish: hover/active states across all tabs ── */
+        button{transition:transform .15s cubic-bezier(.34,1.56,.64,1),filter .15s ease;}
+        button:hover{filter:brightness(1.08);}
+        button:active{transform:scale(.97);}
+        .card,.sc,.goal-card,.task-item,.notif-item{transition:transform .2s cubic-bezier(.16,1,.3,1),box-shadow .2s ease,border-color .2s ease,background-color .2s ease;}
+        .card:hover,.sc:hover,.goal-card:hover{transform:translateY(-3px);border-color:rgba(245,158,11,.35);background-color:var(--hovbg);box-shadow:0 10px 28px -10px rgba(0,0,0,.55);}
+        .card:active,.sc:active,.goal-card:active{transform:translateY(-1px) scale(.995);}
+        .task-item:hover{transform:translateY(-2px);border-color:rgba(245,158,11,.3);background-color:var(--hovbg);box-shadow:0 6px 18px -8px rgba(0,0,0,.55);}
+        .notif-item:hover{transform:translateX(4px);background-color:var(--hovbg);box-shadow:0 6px 18px -8px rgba(0,0,0,.55);}
+        .chk{transition:transform .15s cubic-bezier(.34,1.56,.64,1),border-color .15s,box-shadow .15s;}
+        .chk:hover{border-color:var(--amb);transform:scale(1.12);box-shadow:0 0 0 4px rgba(245,158,11,.14);}
+        .chk.done{animation:chkPop .28s cubic-bezier(.34,1.56,.64,1);}
+        @keyframes chkPop{0%{transform:scale(.55);}65%{transform:scale(1.18);}100%{transform:scale(1);}}
+        .btn,.icon-btn,.menu-btn{transition:transform .15s cubic-bezier(.34,1.56,.64,1),filter .15s ease,box-shadow .15s ease,background .15s ease,border-color .15s ease;}
+        .btn:hover{transform:translateY(-1px);filter:brightness(1.12);box-shadow:0 4px 14px -6px rgba(0,0,0,.5);}
+        .btn:active{transform:translateY(0) scale(.96);filter:brightness(.97);}
+        .icon-btn:hover,.menu-btn:hover{transform:translateY(-2px) scale(1.06);background:var(--ov3);border-color:rgba(245,158,11,.4);}
+        .icon-btn:active,.menu-btn:active{transform:scale(.93);}
+        .av{transition:transform .2s cubic-bezier(.34,1.56,.64,1);}
+        .sb-user:hover .av{transform:scale(1.08) rotate(-4deg);}
+        .sb-item,.mm-item,.sn-item,.nf{transition:transform .15s ease,background .15s ease,color .15s ease;}
+        .sb-item:hover,.mm-item:hover,.sn-item:hover,.nf:hover{transform:translateX(3px);}
+        .bn-item{transition:transform .15s cubic-bezier(.34,1.56,.64,1);}
+        .bn-item:hover{transform:translateY(-2px);}
+        .bn-item:active{transform:scale(.92);}
+        .cal-day{cursor:pointer;transition:transform .18s cubic-bezier(.16,1,.3,1),box-shadow .18s ease,background-color .18s ease;border-radius:8px;}
+        .cal-day:hover{background-color:rgba(245,158,11,.14)!important;box-shadow:0 0 0 1.5px var(--amb) inset,0 0 18px -2px rgba(245,158,11,.6);transform:scale(1.035);z-index:1;}
+        .cal-day:active{transform:scale(.99);}
+        .hm-c{transition:transform .15s ease,box-shadow .15s ease;cursor:default;}
+        .hm-c:hover{transform:scale(1.3);box-shadow:0 0 10px rgba(245,158,11,.5);}
+        .bw{transition:transform .15s ease;}
+        .bw:hover{transform:translateY(-2px);}
+        .bar{transition:filter .2s ease,height .6s ease;}
+        .bw:hover .bar{filter:brightness(1.3);}
+        .sr{transition:background .15s ease;border-radius:8px;}
+        .sr:hover{background:var(--ov1);}
+        .swatch{transition:transform .15s cubic-bezier(.34,1.56,.64,1);}
+        .swatch:hover{transform:scale(1.22);}
+        .goal-card:hover .pf,.card:hover .pf{filter:brightness(1.15);}
         /* Responsive */
         @media(max-width:640px){
           .sidebar{position:fixed;left:0;top:0;bottom:0;height:100vh;transform:translateX(-100%);z-index:200;}
@@ -896,9 +1056,9 @@ export default function DashboardPage() {
           .form-grid{grid-template-columns:1fr;}
         }
         @media(max-width:380px){.g4{grid-template-columns:1fr 1fr;}.sc-v{font-size:20px;}}
-        *{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.1) transparent;}
+        *{scrollbar-width:thin;scrollbar-color:var(--ov3) transparent;}
         *::-webkit-scrollbar{width:3px;}
-        *::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:100px;}
+        *::-webkit-scrollbar-thumb{background:var(--ov3);border-radius:100px;}
       `}} />
 
       {/* Overlays */}
@@ -914,7 +1074,7 @@ export default function DashboardPage() {
           </button>
         ))}
         <div style={{height:1,background:'var(--bdr)',margin:'6px 0'}}/>
-        <button className="mm-item" style={{color:'var(--red)'}} onClick={()=>router.push('/')}>
+        <button className="mm-item" style={{color:'var(--red)'}} onClick={doLogout}>
           <span style={{fontSize:18}}>↩</span>Logout
         </button>
       </div>
@@ -929,7 +1089,7 @@ export default function DashboardPage() {
             <nav className="sb-nav">
               <div className="sb-sec">Main</div>
               {[...mainNav,...moreNav].map(item=>(
-                <button key={item.id} className={`sb-item${page===item.id?' active':''}`} onClick={()=>navTo(item.id)}>
+                <button key={item.id} className={`sb-item${navActive(item.id)?' active':''}`} onClick={()=>navTo(item.id)}>
                   <span className="sb-icon">{item.icon}</span>{item.label}
                   {item.id==='tasks'&&todoTasks.length>0&&<span className="sb-badge sb-badge-amb">{todoTasks.length}</span>}
                   {item.id==='notifications'&&unreadCount>0&&<span className="sb-badge sb-badge-red">{unreadCount}</span>}
@@ -950,10 +1110,10 @@ export default function DashboardPage() {
                 <div className="tb-title">{titles[page]}</div>
               </div>
               <div className="tb-right">
-                <div className="tb-date">Thu 26 Feb 2026</div>
+                <div className="tb-date">{todayLabel}</div>
                 <button className="icon-btn" onClick={()=>navTo('notifications')}>🔔{unreadCount>0&&<div className="notif-dot"/>}</button>
                 <button className="icon-btn" onClick={()=>navTo('settings')}><div className="av" style={{width:26,height:26,fontSize:11}}>A</div></button>
-                <button className="btn btn-ghost" style={{fontSize:11,color:'var(--red)',padding:'6px 10px'}} onClick={()=>router.push('/')}>↩</button>
+                <button className="btn btn-ghost" style={{fontSize:11,color:'var(--red)',padding:'6px 10px'}} onClick={doLogout} title="Log out">↩</button>
               </div>
             </div>
 
@@ -972,26 +1132,28 @@ export default function DashboardPage() {
                 </div>
                 <div className="g4" style={{marginBottom:14}}>
                   {[{l:'⏱ This Week',v:analytics?`${(analytics.study.totalMins7Days/60).toFixed(1)}h`:'0h',c:'var(--amb)',d:`${analytics?.study.sessionCount7Days||0} sessions`,cl:''},{l:'✅ Done',v:`${doneTasks.length}`,c:'var(--grn)',d:`of ${tasks.length}`,cl:''},{l:'📋 To Do',v:`${todoTasks.length}`,c:'#f97316',d:'pending',cl:''},{l:'🎯 Focus',v:analytics?`${analytics.study.avgFocusScore}`:'0',c:'var(--tx)',d:'avg score',cl:''}].map(s=>(
-                    <div key={s.l} className="sc"><div className="sc-l">{s.l}</div><div className="sc-v" style={{color:s.c}}>{s.v}</div>{s.d&&<span className={`delta ${s.cl}`}>{s.d}</span>}{s.l.includes('Goal')&&<div className="pt" style={{marginTop:7}}><div className="pf" style={{width:'68%',background:'linear-gradient(90deg,#6366f1,#f59e0b)'}}/></div>}</div>
+                    <div key={s.l} className="sc"><div className="sc-l">{s.l}</div><div className="sc-v" style={{color:s.c}}>{s.v}</div>{s.d&&<span className={`delta ${s.cl}`}>{s.d}</span>}</div>
                   ))}
                 </div>
                 <div className="g2">
-                  <div>
+                  <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
                     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><div style={{fontSize:13,fontWeight:700}}>🤖 AI-Prioritized Tasks</div><button className="btn btn-ai" style={{padding:'5px 10px',fontSize:11}} onClick={()=>showToast('🤖 AI re-ranking tasks...')}>✨ Re-rank</button></div>
-                    {(() => {
-                      const pending = [...tasks].filter(t=>t.status==='TODO'||t.status==='IN_PROGRESS').sort((a,b)=>(b.aiPriority||0)-(a.aiPriority||0)).slice(0,3)
-                      if (pending.length === 0) return <div style={{fontSize:12,color:'var(--mut)',textAlign:'center',padding:'20px 0'}}>No tasks yet</div>
-                      return pending.map(t=>{
-                        const due = formatDue(t.dueDate)
-                        return (
-                          <div key={t.id} className="task-item" onClick={()=>navTo('tasks')}>
-                            <div className={`chk${t.status==='COMPLETED'?' done':''}`} onClick={e=>{e.stopPropagation();toggleTask(t)}}>{t.status==='COMPLETED'?'✓':''}</div>
-                            <div className="ti-info"><div className="ti-title">{t.title}</div><div className="ti-meta">{t.subject && <span className="badge b-cs">{t.subject}</span>}<span className="badge" style={{background:'rgba(255,255,255,.06)',color:priorityColor(t.priority)}}>{t.priority}</span></div></div>
-                            {due && <div className={`ti-due${due.urgent?' urg':''}`}>{due.label}</div>}
-                          </div>
-                        )
-                      })
-                    })()}
+                    <div style={{flex:1}}>
+                      {(() => {
+                        const pending = [...tasks].filter(t=>t.status==='TODO'||t.status==='IN_PROGRESS').sort((a,b)=>(b.aiPriority||0)-(a.aiPriority||0)).slice(0,3)
+                        if (pending.length === 0) return <div style={{fontSize:12,color:'var(--mut)',textAlign:'center',padding:'20px 0'}}>No tasks yet</div>
+                        return pending.map(t=>{
+                          const due = formatDue(t.dueDate)
+                          return (
+                            <div key={t.id} className="task-item" onClick={()=>navTo('tasks')}>
+                              <div className={`chk${t.status==='COMPLETED'?' done':''}`} onClick={e=>{e.stopPropagation();toggleTask(t)}}>{t.status==='COMPLETED'?'✓':''}</div>
+                              <div className="ti-info"><div className="ti-title">{t.title}</div><div className="ti-meta">{t.subject && <span className="badge b-cs">{t.subject}</span>}<span className="badge" style={{background:'var(--ov2)',color:priorityColor(t.priority)}}>{t.priority}</span></div></div>
+                              {due && <div className={`ti-due${due.urgent?' urg':''}`}>{due.date} · {due.label}</div>}
+                            </div>
+                          )
+                        })
+                      })()}
+                    </div>
                     <button className="btn btn-ghost" style={{width:'100%',marginTop:8}} onClick={()=>navTo('tasks')}>View all tasks →</button>
                   </div>
                   <div style={{display:'flex',flexDirection:'column',gap:12}}>
@@ -1001,7 +1163,7 @@ export default function DashboardPage() {
                       return daily.map((b:DailyData,i:number)=>{
                         const pct = Math.round((b.studyMins/maxMins)*100)
                         const isWeekend = b.label==='Sat'||b.label==='Sun'
-                        return <div key={i} className="bw"><div className="bar" style={{height:`${Math.max(4,pct)}%`,background:`linear-gradient(180deg,${isWeekend?'rgba(255,255,255,.12)':'var(--amb)'},${isWeekend?'rgba(255,255,255,.08)':'var(--amb)'}aa)`}} title={`${(b.studyMins/60).toFixed(1)}h`}/><div className="blbl">{b.label[0]}</div></div>
+                        return <div key={i} className="bw"><div className="bar" style={{height:`${Math.max(4,pct)}%`,background:`linear-gradient(180deg,${isWeekend?'var(--ov4)':'var(--amb)'},${isWeekend?'var(--ov3)':'var(--amb)'}aa)`}} title={`${(b.studyMins/60).toFixed(1)}h`}/><div className="blbl">{b.label[0]}</div></div>
                       })
                     })()}</div></div>
                     <div className="card">
@@ -1014,7 +1176,7 @@ export default function DashboardPage() {
                         )
                       })}
                     </div>
-                    <div className="card"><div className="card-t">🔥 Activity</div><div className="heatmap">{heatData.map((v,i)=><div key={i} className="hm-c" style={{background:heatLvls[v]}}/>)}</div></div>
+                    <div className="card"><div className="card-t">🔥 Activity</div><div className="heatmap-days">{heatDayLabels.map((d,i)=><div key={i} className="hm-lbl">{d}</div>)}</div><div className="heatmap">{heatData.map((d,i)=><div key={i} className="hm-c" style={{background:heatLvls[d.level]}} title={d.date.toLocaleDateString('en-US',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}/>)}</div></div>
                   </div>
                 </div>
               </div>
@@ -1086,7 +1248,7 @@ export default function DashboardPage() {
                                 <div style={{display:'flex',gap:4,marginTop:3,flexWrap:'wrap',alignItems:'center'}}>
                                   {t.subject && <span style={{fontSize:11,background:'var(--sur2)',border:'1px solid var(--bdr)',borderRadius:4,padding:'1px 6px'}}>{t.subject}</span>}
                                   <span style={{fontSize:11,fontWeight:700,color:priorityColor(t.priority)}}>{t.priority}</span>
-                                  {due && <span style={{fontSize:11,color:due.urgent?'var(--red)':'var(--mut)'}}>{due.label}</span>}
+                                  {due && <span style={{fontSize:11,color:due.urgent?'var(--red)':'var(--mut)'}}>📅 {due.date} · {due.label}</span>}
                                 </div>
                               </div>
                               <button onClick={()=>setDeleteConfirm({id:t.id, title:t.title})} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'2px 4px',opacity:.5}} title="Delete">✕</button>
@@ -1189,7 +1351,7 @@ export default function DashboardPage() {
                     </div>
                     <div style={{position:'relative',width:circleSize,height:circleSize,margin:'0 auto 18px'}}>
                       <svg style={{transform:'rotate(-90deg)'}} width={circleSize} height={circleSize} viewBox={`0 0 ${circleSize} ${circleSize}`}>
-                        <circle fill="none" stroke="rgba(255,255,255,.06)" strokeWidth="8" cx={circleSize/2} cy={circleSize/2} r={circleR}/>
+                        <circle fill="none" style={{stroke:'var(--ov2)'}} strokeWidth="8" cx={circleSize/2} cy={circleSize/2} r={circleR}/>
                         <circle fill="none" stroke="#f59e0b" strokeWidth="8" strokeLinecap="round" strokeDasharray={circumference} cx={circleSize/2} cy={circleSize/2} r={circleR} style={{strokeDashoffset:showCustomSetup?0:dashOffset,transition:'stroke-dashoffset 1s linear'}}/>
                       </svg>
                       <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
@@ -1270,7 +1432,7 @@ export default function DashboardPage() {
               <div className={`dp${page==='calendar'?' active':''}`}>
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14,gap:8,flexWrap:'wrap'}}>
                   <div style={{display:'flex',alignItems:'center',gap:10}}><button className="btn btn-ghost" style={{padding:'7px 12px'}} onClick={calPrev}>←</button><div style={{fontSize:15,fontWeight:800,width:190,textAlign:'center',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{calendarLabel}</div><button className="btn btn-ghost" style={{padding:'7px 12px'}} onClick={calNext}>→</button></div>
-                  <div style={{display:'flex',gap:8}}><button className="btn btn-ai" style={{fontSize:12}} onClick={()=>showToast('🤖 Generating schedule...')}>🤖 AI Plan</button><button className="btn btn-amb" style={{fontSize:12}}>+ Event</button></div>
+                  <div style={{display:'flex',gap:8}}><button className="btn btn-ai" style={{fontSize:12}} onClick={()=>showToast('🤖 Generating schedule...')}>🤖 AI Plan</button><button className="btn btn-amb" style={{fontSize:12}} onClick={()=>openDay(calendarDate)}>+ Event</button></div>
                 </div>
                 <div className="nf-bar">
                   {(['month','week','year'] as const).map(v=><button key={v} className={`nf${calendarView===v?' active':''}`} onClick={()=>setCalendarView(v)}>{v==='month'?'Month':v==='week'?'Week':'Year'}</button>)}
@@ -1287,7 +1449,7 @@ export default function DashboardPage() {
                         const inMonth = date.getMonth() === calendarDate.getMonth()
                         const events = calEvents[date.toDateString()] || []
                         return (
-                          <div key={i} style={{minHeight:80,padding:'8px 6px',borderRight:'1px solid rgba(255,255,255,.05)',borderBottom:'1px solid rgba(255,255,255,.05)',background:isToday?'rgba(245,158,11,.05)':'',opacity:inMonth?1:0.35}}>
+                          <div key={i} className="cal-day" onClick={()=>openDay(date)} style={{minHeight:80,padding:'8px 6px',borderRight:'1px solid var(--ov1)',borderBottom:'1px solid var(--ov1)',background:isToday?'rgba(245,158,11,.05)':'',opacity:inMonth?1:0.35}}>
                             <div style={{fontSize:12,fontWeight:isToday?800:600,color:isToday?'var(--amb)':'var(--tx)',marginBottom:4}}>{date.getDate()}</div>
                             {events.slice(0,3).map((ev,j)=><div key={j} style={{background:`${ev.c}22`,borderLeft:`2px solid ${ev.c}`,borderRadius:3,padding:'2px 4px',fontSize:9,marginBottom:2,color:ev.c,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ev.t}</div>)}
                             {events.length>3 && <div style={{fontSize:9,color:'var(--mut)',marginTop:2}}>+{events.length-3} more</div>}
@@ -1304,7 +1466,7 @@ export default function DashboardPage() {
                       {weekDays.map((date,i)=>{
                         const isToday = date.toDateString() === new Date().toDateString()
                         return (
-                          <div key={i} style={{padding:'10px 4px',textAlign:'center',borderRight:i<6?'1px solid rgba(255,255,255,.05)':'none'}}>
+                          <div key={i} className="cal-day" onClick={()=>openDay(date)} style={{padding:'10px 4px',textAlign:'center',borderRight:i<6?'1px solid var(--ov1)':'none'}}>
                             <div style={{fontSize:10,fontWeight:700,color:'var(--mut)',marginBottom:2}}>{date.toLocaleDateString('en-US',{weekday:'short'})}</div>
                             <div style={{fontSize:13,fontWeight:800,color:isToday?'var(--amb)':'var(--tx)'}}>{date.getDate()}</div>
                           </div>
@@ -1315,7 +1477,7 @@ export default function DashboardPage() {
                       {weekDays.map((date,i)=>{
                         const events = calEvents[date.toDateString()] || []
                         return (
-                          <div key={i} style={{padding:'8px 6px',borderRight:i<6?'1px solid rgba(255,255,255,.05)':'none'}}>
+                          <div key={i} className="cal-day" onClick={()=>openDay(date)} style={{padding:'8px 6px',borderRight:i<6?'1px solid var(--ov1)':'none'}}>
                             {events.map((ev,j)=><div key={j} style={{background:`${ev.c}22`,borderLeft:`2px solid ${ev.c}`,borderRadius:3,padding:'4px 6px',fontSize:11,marginBottom:4,color:ev.c,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ev.t}</div>)}
                           </div>
                         )
@@ -1337,7 +1499,7 @@ export default function DashboardPage() {
                               const isToday = date.toDateString()===new Date().toDateString()
                               const hasEvents = (calEvents[date.toDateString()]||[]).length>0
                               return (
-                                <div key={i} style={{aspectRatio:'1',display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,borderRadius:4,opacity:inMonth?1:0.25,background:isToday?'rgba(245,158,11,.15)':'',color:isToday?'var(--amb)':'var(--tx2)',fontWeight:isToday?800:500,position:'relative'}}>
+                                <div key={i} className="cal-day" onClick={()=>openDay(date)} style={{aspectRatio:'1',display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,borderRadius:4,opacity:inMonth?1:0.25,background:isToday?'rgba(245,158,11,.15)':'',color:isToday?'var(--amb)':'var(--tx2)',fontWeight:isToday?800:500,position:'relative'}}>
                                   {date.getDate()}
                                   {hasEvents && inMonth && <div style={{position:'absolute',bottom:1,width:3,height:3,borderRadius:'50%',background:'var(--amb)'}}/>}
                                 </div>
@@ -1349,6 +1511,55 @@ export default function DashboardPage() {
                     })}
                   </div>
                 )}
+              </div>
+
+              {/* ── CALENDAR DAY (DAY PLANNER) ── */}
+              <div className={`dp${page==='calendarDay'?' active':''}`}>
+                <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16,flexWrap:'wrap'}}>
+                  <button className="btn btn-ghost" onClick={()=>navTo('calendar')}>← Back to Calendar</button>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:18,fontWeight:900,letterSpacing:'-0.02em'}}>{selectedDate.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})}</div>
+                    {selectedDate.toDateString()===new Date().toDateString() && <span className="badge b-hi" style={{marginTop:4,display:'inline-block'}}>📍 Today</span>}
+                  </div>
+                </div>
+
+                <div className="card" style={{marginBottom:16}}>
+                  <div className="card-t">+ Add Task for This Day</div>
+                  {dayTaskError && <div style={{background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#fca5a5',marginBottom:10}}>{dayTaskError}</div>}
+                  <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                    <input className="f-input" style={{flex:'2 1 200px'}} placeholder="What do you need to do?" value={dayNewTitle}
+                      onChange={e=>setDayNewTitle(e.target.value)}
+                      onKeyDown={e=>{if(e.key==='Enter')createTaskForDay()}}/>
+                    <select className="f-select" style={{flex:'0 0 130px'}} value={dayNewPriority} onChange={e=>setDayNewPriority(e.target.value as Task['priority'])}>
+                      <option value="LOW">Low</option>
+                      <option value="MEDIUM">Medium</option>
+                      <option value="HIGH">High</option>
+                      <option value="URGENT">Urgent</option>
+                    </select>
+                    <button className="btn btn-amb" onClick={createTaskForDay}>+ Add Task</button>
+                  </div>
+                </div>
+
+                <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--mut)',marginBottom:10}}>{dayTasks.length} task{dayTasks.length===1?'':'s'} scheduled</div>
+
+                {dayTasks.length === 0 ? (
+                  <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:160,color:'var(--tx2)',gap:10}}>
+                    <div style={{fontSize:32}}>🗓️</div>
+                    <div style={{fontSize:13}}>Nothing scheduled for this day yet</div>
+                  </div>
+                ) : dayTasks.map(t=>(
+                  <div key={t.id} className="task-item" style={t.status==='COMPLETED'?{opacity:.55}:{}}>
+                    <div className={`chk${t.status==='COMPLETED'?' done':''}`} onClick={()=>toggleTask(t)}>{t.status==='COMPLETED'?'✓':''}</div>
+                    <div className="ti-info">
+                      <div className="ti-title">{t.title}</div>
+                      <div className="ti-meta">
+                        {t.subject && <span className="badge b-cs">{t.subject}</span>}
+                        <span className="badge" style={{background:'var(--ov2)',color:priorityColor(t.priority)}}>{t.priority}</span>
+                      </div>
+                    </div>
+                    <button onClick={()=>setDeleteConfirm({id:t.id, title:t.title})} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'2px 4px',opacity:.5}} title="Delete">✕</button>
+                  </div>
+                ))}
               </div>
 
               {/* ── GOALS ── */}
@@ -1389,7 +1600,7 @@ export default function DashboardPage() {
                         <div style={{fontSize:20,fontWeight:900,fontFamily:"'DM Mono',monospace",color:'var(--amb)'}}>{pct}%</div>
                       </div>
                       <div style={{display:'flex',alignItems:'center',gap:10}}>
-                        <div style={{flex:1,height:7,background:'rgba(255,255,255,.06)',borderRadius:100,overflow:'hidden'}}><div style={{height:'100%',width:`${pct}%`,background:'linear-gradient(90deg,#6366f1,#f59e0b)',borderRadius:100}}/></div>
+                        <div style={{flex:1,height:7,background:'var(--ov2)',borderRadius:100,overflow:'hidden'}}><div style={{height:'100%',width:`${pct}%`,background:'linear-gradient(90deg,#6366f1,#f59e0b)',borderRadius:100}}/></div>
                         <div style={{fontSize:11,color:'var(--mut)',fontFamily:"'DM Mono',monospace",whiteSpace:'nowrap'}}>{g.currentValue}/{g.targetValue}{g.unit==='hours'?'h':''}</div>
                       </div>
                     </div>
@@ -1410,7 +1621,7 @@ export default function DashboardPage() {
                           <div style={{fontSize:20,fontWeight:900,fontFamily:"'DM Mono',monospace",color:'var(--grn)'}}>100%</div>
                         </div>
                         <div style={{display:'flex',alignItems:'center',gap:10}}>
-                          <div style={{flex:1,height:7,background:'rgba(255,255,255,.06)',borderRadius:100,overflow:'hidden'}}>
+                          <div style={{flex:1,height:7,background:'var(--ov2)',borderRadius:100,overflow:'hidden'}}>
                             <div style={{height:'100%',width:'100%',background:'var(--grn)',borderRadius:100}}/>
                           </div>
                           <div style={{fontSize:11,color:'var(--grn)',fontFamily:"'DM Mono',monospace",whiteSpace:'nowrap'}}>✓ Done</div>
@@ -1440,7 +1651,7 @@ export default function DashboardPage() {
                     return daily.map((b:DailyData,i:number)=>{
                       const pct = Math.round((b.studyMins/maxMins)*100)
                       const isWeekend = b.label==='Sat'||b.label==='Sun'
-                      return <div key={i} className="bw"><div className="bar" style={{height:`${Math.max(4,pct)}%`,background:`linear-gradient(180deg,${isWeekend?'rgba(255,255,255,.12)':'var(--amb)'},${isWeekend?'rgba(255,255,255,.08)':'var(--amb)'}aa)`}} title={`${(b.studyMins/60).toFixed(1)}h`}/><div className="blbl">{b.label[0]}</div></div>
+                      return <div key={i} className="bw"><div className="bar" style={{height:`${Math.max(4,pct)}%`,background:`linear-gradient(180deg,${isWeekend?'var(--ov4)':'var(--amb)'},${isWeekend?'var(--ov3)':'var(--amb)'}aa)`}} title={`${(b.studyMins/60).toFixed(1)}h`}/><div className="blbl">{b.label[0]}</div></div>
                     })
                   })()}</div></div>
                   <div className="card"><div className="card-t">🎯 Subjects (last 30 days)</div>{(() => {
@@ -1451,7 +1662,6 @@ export default function DashboardPage() {
                     return subs.slice(0,5).map((s:SubjectData,i:number)=><div key={i} style={{marginBottom:9}}><div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:3}}><span>{s.subject}</span><span style={{fontFamily:"'DM Mono',monospace"}}>{(s.totalMins/60).toFixed(1)}h</span></div><div className="pt" style={{height:5}}><div className="pf" style={{width:`${Math.round((s.totalMins/maxMins)*100)}%`,background:colors[i%colors.length]}}/></div></div>)
                   })()}</div>
                 </div>
-                <div className="card"><div className="card-t">🤖 AI Features</div><div style={{display:'flex',flexDirection:'column',gap:8}}>{[{t:'📋 Task Prioritization',desc:'AI ranks your tasks by urgency, importance, and effort using Groq Llama 3.3.'},{t:'🤖 Ask Kira (Study Q&A)',desc:'Chat with Kira to get step-by-step explanations for any study topic.'},{t:'🗓 Schedule Optimization',desc:'AI generates an optimized study plan from your tasks and available time.'}].map(a=><div key={a.t} style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:10,padding:'11px 13px'}}><div style={{fontWeight:600,fontSize:13,marginBottom:5}}>{a.t}</div><p style={{fontSize:12,color:'var(--tx2)'}}>{a.desc}</p></div>)}</div></div>
               </div>
 
               {/* ── NOTIFICATIONS ── */}
@@ -1485,14 +1695,48 @@ export default function DashboardPage() {
               <div className={`dp${page==='settings'?' active':''}`}>
                 <div className="settings-layout">
                   <div className="settings-nav">
-                    {[{id:'profile',ic:'👤',l:'Profile'},{id:'prefs',ic:'🎨',l:'Prefs'},{id:'notif',ic:'🔔',l:'Notifs'},{id:'security',ic:'🔒',l:'Security'},{id:'danger',ic:'⚠️',l:'Danger'}].map(t=>(
+                    {[{id:'profile',ic:'👤',l:'Profile'},{id:'prefs',ic:'🎨',l:'Prefs'},{id:'security',ic:'🔒',l:'Security'},{id:'danger',ic:'⚠️',l:'Danger'}].map(t=>(
                       <button key={t.id} className={`sn-item${settingsTab===t.id?' active':''}`} style={t.id==='danger'?{color:'var(--red)'}:{}} onClick={()=>setSettingsTab(t.id)}>
                         <span>{t.ic}</span><span className="sn-lbl">{t.l}</span>
                       </button>
                     ))}
                   </div>
                   <div>
-                    {settingsTab==='profile'&&<div className="ss active"><div className="ss-title">Profile</div><div className="ss-sub">Manage your information</div><div style={{display:'flex',alignItems:'center',gap:14,marginBottom:18}}><div style={{width:64,height:64,borderRadius:'50%',background:'linear-gradient(135deg,#f59e0b,#d97706)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,fontWeight:800,color:'#000'}}>{userName.charAt(0).toUpperCase()}</div><div><div style={{fontSize:17,fontWeight:800}}>{userName}</div><div style={{fontSize:12,color:'var(--mut)'}}>{userEmail||'—'}</div></div></div><div className="s-card">{[{l:'Full Name',v:userName},{l:'Email',v:userEmail||'—'},{l:'Institution',v:'BINUS University'},{l:'Timezone',v:'Asia/Jakarta (UTC+7)'}].map(r=><div key={r.l} className="sr"><div><div className="sr-lbl">{r.l}</div><div className="sr-desc">{r.v}</div></div></div>)}</div></div>}
+                    {settingsTab==='profile'&&<div className="ss active">
+                      <div className="ss-title">Profile</div>
+                      <div className="ss-sub">Manage your information</div>
+                      <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:18}}>
+                        <div style={{width:64,height:64,borderRadius:'50%',background:'linear-gradient(135deg,#f59e0b,#d97706)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,fontWeight:800,color:'#000'}}>{userName.charAt(0).toUpperCase()}</div>
+                        <div><div style={{fontSize:17,fontWeight:800}}>{userName}</div><div style={{fontSize:12,color:'var(--mut)'}}>{userEmail||'—'}</div></div>
+                      </div>
+                      <div className="s-card">
+                        <div className="sr">
+                          <div style={{flex:1,minWidth:0}}>
+                            <div className="sr-lbl">Full Name</div>
+                            {editingProfile ? (
+                              <input className="f-input" style={{marginTop:6,maxWidth:280}} value={editName}
+                                onChange={e=>setEditName(e.target.value)}
+                                onKeyDown={e=>{if(e.key==='Enter')saveProfile(); if(e.key==='Escape'){setEditingProfile(false);setEditName(userName)}}}
+                                autoFocus/>
+                            ) : (
+                              <div className="sr-desc">{userName}</div>
+                            )}
+                          </div>
+                          {editingProfile ? (
+                            <div style={{display:'flex',gap:6,flexShrink:0}}>
+                              <button className="btn btn-amb" style={{fontSize:12,padding:'6px 12px'}} onClick={saveProfile} disabled={profileSaving}>{profileSaving?'Saving...':'Save'}</button>
+                              <button className="btn btn-ghost" style={{fontSize:12,padding:'6px 12px'}} onClick={()=>{setEditingProfile(false);setEditName(userName)}} disabled={profileSaving}>Cancel</button>
+                            </div>
+                          ) : (
+                            <button className="btn btn-ghost" style={{fontSize:12,padding:'6px 12px',flexShrink:0}} onClick={()=>{setEditName(userName);setEditingProfile(true)}}>✏️ Edit</button>
+                          )}
+                        </div>
+                        <div className="sr"><div><div className="sr-lbl">Email</div><div className="sr-desc">{userEmail||'—'}</div></div></div>
+                        <div className="sr"><div><div className="sr-lbl">Institution</div><div className="sr-desc">BINUS University</div></div></div>
+                        <div className="sr"><div><div className="sr-lbl">Timezone</div><div className="sr-desc">Asia/Jakarta (UTC+7)</div></div></div>
+                      </div>
+                      <button className="btn btn-red" style={{marginTop:14,width:'100%'}} onClick={doLogout}>↩ Log Out</button>
+                    </div>}
                     {settingsTab==='prefs'&&<div className="ss active">
                       <div className="ss-title">Preferences</div>
                       <div className="ss-sub">Customize your experience</div>
@@ -1507,36 +1751,23 @@ export default function DashboardPage() {
                           </select>
                         </div>
                         <div className="sr">
+                          <div><div className="sr-lbl">Theme</div><div className="sr-desc">Light or dark interface</div></div>
+                          <div style={{display:'flex',gap:7}}>
+                            <button className={`btn ${userSettings.theme==='dark'?'btn-amb':'btn-ghost'}`} style={{fontSize:12,padding:'6px 14px'}} onClick={()=>saveSettings({theme:'dark'})}>🌙 Dark</button>
+                            <button className={`btn ${userSettings.theme==='light'?'btn-amb':'btn-ghost'}`} style={{fontSize:12,padding:'6px 14px'}} onClick={()=>saveSettings({theme:'light'})}>☀️ Light</button>
+                          </div>
+                        </div>
+                        <div className="sr">
                           <div><div className="sr-lbl">Accent Color</div><div className="sr-desc">Dashboard theme</div></div>
                           <div style={{display:'flex',gap:7}}>
-                            {['#f59e0b','#6366f1','#10b981','#ef4444','#8b5cf6'].map(c=>(
+                            {accentPalettes[userSettings.theme].map(c=>(
                               <div key={c} className={`swatch${userSettings.accentColor===c?' sel':''}`} style={{background:c}} onClick={()=>saveSettings({accentColor:c})}/>
                             ))}
                           </div>
                         </div>
                       </div>
                     </div>}
-                    {settingsTab==='notif'&&<div className="ss active">
-                      <div className="ss-title">Notifications</div>
-                      <div className="ss-sub">What you get notified about</div>
-                      <div className="s-card">
-                        {([
-                          {key:'notifTaskReminders' as const, l:'Task Reminders', d:'Before deadlines'},
-                          {key:'notifAiInsights' as const, l:'AI Insights', d:'Task priority & tips'},
-                          {key:'notifSessionPrompts' as const, l:'Session Prompts', d:'Study reminders'},
-                          {key:'notifAchievements' as const, l:'Achievements', d:'Streaks & goals'},
-                        ]).map(r=>(
-                          <div key={r.key} className="sr">
-                            <div><div className="sr-lbl">{r.l}</div><div className="sr-desc">{r.d}</div></div>
-                            <label className="toggle">
-                              <input type="checkbox" checked={userSettings[r.key]} onChange={e=>saveSettings({[r.key]:e.target.checked})}/>
-                              <span className="tslider"/>
-                            </label>
-                          </div>
-                        ))}
-                      </div>
-                    </div>}
-                    {settingsTab==='security'&&<div className="ss active"><div className="ss-title">Security</div><div className="ss-sub">Account security settings</div><div className="s-card"><div className="sr"><div><div className="sr-lbl">Password</div><div className="sr-desc">Changed 30 days ago</div></div><button className="btn btn-ghost" style={{fontSize:12,padding:'6px 12px'}}>Change</button></div><div className="sr"><div><div className="sr-lbl">Two-Factor Auth</div><div className="sr-desc">Extra security</div></div><label className="toggle"><input type="checkbox"/><span className="tslider"/></label></div><div className="sr"><div><div className="sr-lbl">Active Sessions</div><div className="sr-desc">1 device signed in</div></div><button className="btn btn-ghost" style={{fontSize:12,padding:'6px 12px'}}>View</button></div></div></div>}
+                    {settingsTab==='security'&&<div className="ss active"><div className="ss-title">Security</div><div className="ss-sub">Account security settings</div><div className="s-card"><div className="sr"><div><div className="sr-lbl">Password</div><div className="sr-desc">Changed 30 days ago</div></div><button className="btn btn-ghost" style={{fontSize:12,padding:'6px 12px'}}>Change</button></div></div></div>}
                     {settingsTab==='danger'&&<div className="ss active"><div className="ss-title" style={{color:'var(--red)'}}>Danger Zone</div><div className="ss-sub">Irreversible — proceed carefully</div><div className="danger-box"><div style={{fontSize:13,fontWeight:700,color:'var(--red)',marginBottom:12}}>⚠️ Irreversible Actions</div><div style={{display:'flex',flexDirection:'column',gap:10}}>{[{t:'Clear All Data',d:'Delete sessions, tasks & analytics'},{t:'Delete Account',d:'Permanently remove all data'}].map(a=><div key={a.t} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:12,background:'rgba(239,68,68,.05)',border:'1px solid rgba(239,68,68,.15)',borderRadius:10,gap:12}}><div><div style={{fontSize:13,fontWeight:600}}>{a.t}</div><div style={{fontSize:12,color:'var(--mut)'}}>{a.d}</div></div><button className="btn btn-red" style={{fontSize:12}} onClick={()=>a.t.includes('Account')?router.push('/'):showToast('⚠️ This cannot be undone!')}>Delete</button></div>)}</div></div></div>}
                   </div>
                 </div>
@@ -1549,7 +1780,7 @@ export default function DashboardPage() {
         {/* Bottom Nav */}
         <nav className="bottom-nav">
           {mainNav.map(item=>(
-            <button key={item.id} className={`bn-item${page===item.id?' active':''}`} onClick={()=>navTo(item.id)}>
+            <button key={item.id} className={`bn-item${navActive(item.id)?' active':''}`} onClick={()=>navTo(item.id)}>
               <div className="bn-icon">{item.icon}</div>
               <div className="bn-lbl">{item.label}</div>
               {item.badge&&<div className="bn-badge">{item.badge}</div>}
