@@ -10,14 +10,6 @@ export const authOptions: NextAuthOptions = {
     GoogleProvider({
       clientId:     process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      // Behind the CS-server reverse proxy NextAuth otherwise builds the
-      // redirect_uri from the internal host (0.0.0.0:3019). Pin it explicitly
-      // to the public callback URL so Google redirects back to a reachable URL.
-      authorization: {
-        params: {
-          redirect_uri: `${process.env.NEXTAUTH_URL}/api/auth/callback/google`,
-        },
-      },
     }),
 
     // ── Email / Password ──────────────────────────────────────────────────
