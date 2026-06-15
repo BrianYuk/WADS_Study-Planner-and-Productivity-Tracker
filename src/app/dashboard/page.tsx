@@ -63,9 +63,29 @@ export default function DashboardPage() {
   const [showCustomSetup, setShowCustomSetup] = useState(false)
   const [goalFormOpen, setGoalFormOpen] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
+  const [notifFilter, setNotifFilter] = useState<'ALL'|'UNREAD'|'AI_INSIGHT'|'REMINDER'|'ACHIEVEMENT'>('ALL')
   const [notifLoading, setNotifLoading] = useState(false)
   const unreadCount = notifications.filter(n=>!n.isRead).length
+  const filteredNotifications = notifications.filter(n => {
+  if (notifFilter === 'ALL') return true
+  if (notifFilter === 'UNREAD') return !n.isRead
+  return n.type === notifFilter
+})
   const [settingsTab, setSettingsTab] = useState('profile')
+  const [deleteConfirm, setDeleteConfirm] = useState<{id:string, title:string}|null>(null)
+  const [settingsLoading, setSettingsLoading] = useState(false)
+  const [settingsSaved, setSettingsSaved] = useState(false)
+  const [userSettings, setUserSettings] = useState({
+    dailyGoalHours: '4',
+    accentColor: '#f59e0b',
+    notifTaskReminders: true,
+    notifAiInsights: true,
+    notifSessionPrompts: true,
+    notifAchievements: false,
+    timerAutoStart: true,
+    timerSound: true,
+    timerLongBreak: false,
+  })  
   const timerRef = useRef<ReturnType<typeof setInterval>|null>(null)
 
   // ── Real API state ──────────────────────────────────────────────
@@ -248,7 +268,9 @@ export default function DashboardPage() {
       })
       if (res.ok) {
         setTasks((prev:Task[]) => prev.map((t:Task) => t.id === task.id ? { ...t, status: newStatus } : t))
-        if (newStatus === 'COMPLETED') showToast('✅ Task complete!')
+        if (newStatus === 'COMPLETED') 
+          showToast('✅ Task complete!')
+          await updateGoalsOnTaskComplete()
       }
     } catch {}
   }
@@ -284,6 +306,89 @@ export default function DashboardPage() {
   }
 
   // ── Goals ─────────────────────────────────────────────────────
+  async function triggerGoalCompleteNotif(goalTitle: string) {
+    try {
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: '🏆 Goal Achieved!',
+          message: `You completed your goal: "${goalTitle}"`,
+          type: 'ACHIEVEMENT',
+        }),
+      })
+      fetchNotifications()
+    } catch {}
+  }
+  
+  async function updateGoalsOnTaskComplete() {
+    const taskGoals = goals.filter(g => g.unit === 'tasks' && g.status !== 'COMPLETED')
+    for (const goal of taskGoals) {
+      const newValue = goal.currentValue + 1
+      const isNowComplete = newValue >= goal.targetValue
+      try {
+        await fetch(`/api/goals/${goal.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            currentValue: newValue,
+            status: isNowComplete ? 'COMPLETED' : 'IN_PROGRESS',
+          }),
+        })
+        if (isNowComplete) {
+          showToast(`🎉 Goal complete: ${goal.title}!`)
+          triggerGoalCompleteNotif(goal.title)
+        }
+      } catch {}
+    }
+    fetchGoals()
+  }
+
+  async function updateGoalsOnSession(durationMins: number) {
+    const hourGoals = goals.filter(g => g.unit === 'hours' && g.status !== 'COMPLETED')
+    const dayGoals  = goals.filter(g => g.unit === 'days'  && g.status !== 'COMPLETED')
+
+    for (const goal of hourGoals) {
+      const newValue = Math.round((goal.currentValue + durationMins / 60) * 100) / 100
+      const isNowComplete = newValue >= goal.targetValue
+      try {
+        await fetch(`/api/goals/${goal.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            currentValue: newValue,
+            status: isNowComplete ? 'COMPLETED' : 'IN_PROGRESS',
+          }),
+        })
+        if (isNowComplete) {
+          showToast(`🎉 Goal complete: ${goal.title}!`)
+          triggerGoalCompleteNotif(goal.title)
+        }
+      } catch {}
+    }
+
+    for (const goal of dayGoals) {
+      const newValue = goal.currentValue + 1
+      const isNowComplete = newValue >= goal.targetValue
+      try {
+        await fetch(`/api/goals/${goal.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            currentValue: newValue,
+            status: isNowComplete ? 'COMPLETED' : 'IN_PROGRESS',
+          }),
+        })
+        if (isNowComplete) {
+          showToast(`🎉 Goal complete: ${goal.title}!`)
+          triggerGoalCompleteNotif(goal.title)
+        }
+      } catch {}
+    }
+
+    fetchGoals()
+  }
+  
   const fetchGoals = useCallback(async () => {
     try {
       const res = await fetch('/api/goals')
@@ -348,6 +453,7 @@ export default function DashboardPage() {
         showToast('✅ Session saved!')
         fetchAnalytics()
         fetchTodaySessions()
+        await updateGoalsOnSession(durationMins)
       }
     } catch (err) { console.error('Failed to save session:', err) }
     setSessionStart(null)
@@ -563,6 +669,37 @@ export default function DashboardPage() {
     })
     return [...Array(Math.max(0, 28 - levels.length)).fill(0), ...levels]
   })()
+
+  // ── Settings ──────────────────────────────────────────────────
+  async function saveSettings(patch: Partial<typeof userSettings>) {
+    const updated = { ...userSettings, ...patch }
+    setUserSettings(updated)
+    setSettingsLoading(true)
+    if (patch.accentColor) {
+      document.documentElement.style.setProperty('--amb', patch.accentColor)
+      document.documentElement.style.setProperty('--adim', patch.accentColor + '20')
+    }
+
+    try {
+      localStorage.setItem('studySettings', JSON.stringify(updated))
+      setSettingsSaved(true)
+      showToast('✅ Settings saved!')
+      setTimeout(() => setSettingsSaved(false), 2000)
+    } catch {
+      showToast('⚠️ Could not save settings')
+    } finally {
+      setSettingsLoading(false)
+    }
+  }
+  
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('studySettings')
+      if (saved) setUserSettings(JSON.parse(saved))
+    } catch {}
+  }, [])
+
+
 
   return (
     <>
@@ -952,7 +1089,7 @@ export default function DashboardPage() {
                                   {due && <span style={{fontSize:11,color:due.urgent?'var(--red)':'var(--mut)'}}>{due.label}</span>}
                                 </div>
                               </div>
-                              <button onClick={()=>deleteTask(t.id)} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'2px 4px',opacity:.5}} title="Delete">✕</button>
+                              <button onClick={()=>setDeleteConfirm({id:t.id, title:t.title})} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'2px 4px',opacity:.5}} title="Delete">✕</button>
                             </div>
                           )
                         })}
@@ -1111,10 +1248,17 @@ export default function DashboardPage() {
                     </div>
                     <div className="card">
                       <div className="card-t">⚙ Settings</div>
-                      {[{l:'Auto-start next',on:true},{l:'Sound alerts',on:true},{l:'Long break after 4',on:false}].map(s=>(
-                        <div key={s.l} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:13}}>
+                      {([
+                        {key:'timerAutoStart' as const, l:'Auto-start next'},
+                        {key:'timerSound' as const, l:'Sound alerts'},
+                        {key:'timerLongBreak' as const, l:'Long break after 4'},
+                      ]).map(s=>(
+                        <div key={s.key} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:13}}>
                           <span style={{fontSize:13,fontWeight:500}}>{s.l}</span>
-                          <label className="toggle"><input type="checkbox" defaultChecked={s.on}/><span className="tslider"/></label>
+                          <label className="toggle">
+                            <input type="checkbox" checked={userSettings[s.key]} onChange={e=>saveSettings({[s.key]:e.target.checked})}/>
+                            <span className="tslider"/>
+                          </label>
                         </div>
                       ))}
                     </div>
@@ -1209,7 +1353,9 @@ export default function DashboardPage() {
 
               {/* ── GOALS ── */}
               <div className={`dp${page==='goals'?' active':''}`}>
-                <div style={{display:'flex',justifyContent:'flex-end',marginBottom:14}}><button className="btn btn-amb" onClick={()=>setGoalFormOpen(!goalFormOpen)}>+ New Goal</button></div>
+                <div style={{display:'flex',justifyContent:'flex-end',marginBottom:14}}>
+                  <button className="btn btn-amb" onClick={()=>setGoalFormOpen(!goalFormOpen)}>+ New Goal</button>
+                </div>
                 <div className={`goal-form${goalFormOpen?' open':''}`}>
                   <div style={{fontSize:15,fontWeight:700,marginBottom:14}}>Create New Goal</div>
                   {goalError && <div style={{background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#fca5a5',marginBottom:12}}>{goalError}</div>}
@@ -1219,16 +1365,22 @@ export default function DashboardPage() {
                     <div><label className="f-label">Target</label><input className="f-input" type="number" placeholder="20" value={newGoal.targetValue} onChange={e=>setNewGoal(v=>({...v,targetValue:e.target.value}))}/></div>
                     <div><label className="f-label">Unit</label><select className="f-select" value={newGoal.unit} onChange={e=>setNewGoal(v=>({...v,unit:e.target.value}))}><option value="hours">hours</option><option value="tasks">tasks</option><option value="days">days</option></select></div>
                   </div>
-                  <label className="f-label">Target Date</label><input className="f-input" type="date" style={{marginBottom:12}} value={newGoal.targetDate} onChange={e=>setNewGoal(v=>({...v,targetDate:e.target.value}))}/>
-                  <div style={{display:'flex',gap:8}}><button className="btn btn-amb" onClick={createGoal}>Save</button><button className="btn btn-ghost" onClick={()=>{setGoalFormOpen(false);setGoalError('')}}>Cancel</button></div>
+                  <label className="f-label">Target Date</label>
+                  <input className="f-input" type="date" style={{marginBottom:12}} value={newGoal.targetDate} onChange={e=>setNewGoal(v=>({...v,targetDate:e.target.value}))}/>
+                  <div style={{display:'flex',gap:8}}>
+                    <button className="btn btn-amb" onClick={createGoal}>Save</button>
+                    <button className="btn btn-ghost" onClick={()=>{setGoalFormOpen(false);setGoalError('')}}>Cancel</button>
+                  </div>
                 </div>
+
+                {/* Active Goals */}
                 <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--mut)',marginBottom:10}}>Active Goals</div>
-                {goals.length === 0 ? (
+                {goals.filter(g=>g.status!=='COMPLETED').length === 0 ? (
                   <div style={{textAlign:'center',padding:'40px 0',color:'var(--tx2)'}}>
                     <div style={{fontSize:32,marginBottom:8}}>🎯</div>
-                    <div style={{fontSize:13}}>No goals yet. Create one to start tracking!</div>
+                    <div style={{fontSize:13}}>No active goals. Create one to start tracking!</div>
                   </div>
-                ) : goals.map(g=>{
+                ) : goals.filter(g=>g.status!=='COMPLETED').map(g=>{
                   const pct = Math.min(100, Math.round((g.currentValue / g.targetValue) * 100))
                   return (
                     <div key={g.id} className="goal-card">
@@ -1243,6 +1395,30 @@ export default function DashboardPage() {
                     </div>
                   )
                 })}
+
+                {/* Completed Goals */}
+                {goals.filter(g=>g.status==='COMPLETED').length > 0 && (<>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--mut)',margin:'20px 0 10px'}}>Completed Goals</div>
+                  {goals.filter(g=>g.status==='COMPLETED').map(g=>{
+                    return (
+                      <div key={g.id} className="goal-card" style={{opacity:.7,border:'1px solid rgba(16,185,129,.2)'}}>
+                        <div style={{display:'flex',justifyContent:'space-between',marginBottom:10}}>
+                          <div>
+                            <div style={{fontSize:14,fontWeight:700}}>🏆 {g.title}</div>
+                            <div style={{fontSize:11,color:'var(--mut)'}}>{g.type.charAt(0)+g.type.slice(1).toLowerCase()} · Completed</div>
+                          </div>
+                          <div style={{fontSize:20,fontWeight:900,fontFamily:"'DM Mono',monospace",color:'var(--grn)'}}>100%</div>
+                        </div>
+                        <div style={{display:'flex',alignItems:'center',gap:10}}>
+                          <div style={{flex:1,height:7,background:'rgba(255,255,255,.06)',borderRadius:100,overflow:'hidden'}}>
+                            <div style={{height:'100%',width:'100%',background:'var(--grn)',borderRadius:100}}/>
+                          </div>
+                          <div style={{fontSize:11,color:'var(--grn)',fontFamily:"'DM Mono',monospace",whiteSpace:'nowrap'}}>✓ Done</div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </>)}
               </div>
 
               {/* ── ANALYTICS ── */}
@@ -1282,16 +1458,18 @@ export default function DashboardPage() {
               <div className={`dp${page==='notifications'?' active':''}`}>
                 <div style={{display:'flex',justifyContent:'flex-end',marginBottom:12}}><button className="btn btn-ghost" style={{fontSize:12}} onClick={markAllNotificationsRead} disabled={unreadCount===0}>✓ Mark all read</button></div>
                 <div className="nf-bar">
-                  {['All','Unread','🤖 AI','🔔 Reminders','🏆 Wins'].map(f=><button key={f} className={`nf${f==='All'?' active':''}`} onClick={e=>{document.querySelectorAll('.nf').forEach(b=>b.classList.remove('active'));(e.currentTarget as HTMLElement).classList.add('active')}}>{f}</button>)}
+                  {([['ALL','All'],['UNREAD','Unread'],['AI_INSIGHT','🤖 AI'],['REMINDER','🔔 Reminders'],['ACHIEVEMENT','🏆 Wins']] as const).map(([val,label])=>(
+                    <button key={val} className={`nf${notifFilter===val?' active':''}`} onClick={()=>setNotifFilter(val)}>{label}</button>
+                  ))}
                 </div>
                 {notifLoading ? (
                   <div style={{fontSize:12,color:'var(--mut)',textAlign:'center',padding:'30px 0'}}>Loading...</div>
-                ) : notifications.length === 0 ? (
+                ) : filteredNotifications.length === 0 ? (
                   <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:200,color:'var(--tx2)',gap:12}}>
                     <div style={{fontSize:32}}>🔔</div>
                     <div style={{fontSize:13}}>No notifications yet</div>
                   </div>
-                ) : notifications.map(n=>{
+                ) : filteredNotifications.map(n=>{
                   const meta = notifMeta[n.type] || notifMeta.SYSTEM
                   return (
                     <div key={n.id} className={`notif-item${meta.cls?' '+meta.cls:''}`} style={n.isRead?{opacity:.65}:{}}>
@@ -1315,8 +1493,49 @@ export default function DashboardPage() {
                   </div>
                   <div>
                     {settingsTab==='profile'&&<div className="ss active"><div className="ss-title">Profile</div><div className="ss-sub">Manage your information</div><div style={{display:'flex',alignItems:'center',gap:14,marginBottom:18}}><div style={{width:64,height:64,borderRadius:'50%',background:'linear-gradient(135deg,#f59e0b,#d97706)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,fontWeight:800,color:'#000'}}>{userName.charAt(0).toUpperCase()}</div><div><div style={{fontSize:17,fontWeight:800}}>{userName}</div><div style={{fontSize:12,color:'var(--mut)'}}>{userEmail||'—'}</div></div></div><div className="s-card">{[{l:'Full Name',v:userName},{l:'Email',v:userEmail||'—'},{l:'Institution',v:'BINUS University'},{l:'Timezone',v:'Asia/Jakarta (UTC+7)'}].map(r=><div key={r.l} className="sr"><div><div className="sr-lbl">{r.l}</div><div className="sr-desc">{r.v}</div></div></div>)}</div></div>}
-                    {settingsTab==='prefs'&&<div className="ss active"><div className="ss-title">Preferences</div><div className="ss-sub">Customize your experience</div><div className="s-card"><div className="sr"><div><div className="sr-lbl">Daily Goal</div><div className="sr-desc">Target hours/day</div></div><select className="f-select" style={{width:110}}><option>2h</option><option selected>4h</option><option>6h</option><option>8h</option></select></div><div className="sr"><div><div className="sr-lbl">Accent Color</div><div className="sr-desc">Dashboard theme</div></div><div style={{display:'flex',gap:7}}>{['#f59e0b','#6366f1','#10b981','#ef4444','#8b5cf6'].map((c,i)=><div key={c} className={`swatch${i===0?' sel':''}`} style={{background:c}} onClick={e=>{document.querySelectorAll('.swatch').forEach(s=>s.classList.remove('sel'));(e.currentTarget as HTMLElement).classList.add('sel');showToast('🎨 Theme updated!')}}/>)}</div></div></div></div>}
-                    {settingsTab==='notif'&&<div className="ss active"><div className="ss-title">Notifications</div><div className="ss-sub">What you get notified about</div><div className="s-card">{[{l:'Task Reminders',d:'Before deadlines',on:true},{l:'AI Insights',d:'Task priority & tips',on:true},{l:'Session Prompts',d:'Study reminders',on:true},{l:'Achievements',d:'Streaks & goals',on:false}].map(r=><div key={r.l} className="sr"><div><div className="sr-lbl">{r.l}</div><div className="sr-desc">{r.d}</div></div><label className="toggle"><input type="checkbox" defaultChecked={r.on}/><span className="tslider"/></label></div>)}</div></div>}
+                    {settingsTab==='prefs'&&<div className="ss active">
+                      <div className="ss-title">Preferences</div>
+                      <div className="ss-sub">Customize your experience</div>
+                      <div className="s-card">
+                        <div className="sr">
+                          <div><div className="sr-lbl">Daily Goal</div><div className="sr-desc">Target hours/day</div></div>
+                          <select className="f-select" style={{width:110}} value={userSettings.dailyGoalHours} onChange={e=>saveSettings({dailyGoalHours:e.target.value})}>
+                            <option value="2">2h</option>
+                            <option value="4">4h</option>
+                            <option value="6">6h</option>
+                            <option value="8">8h</option>
+                          </select>
+                        </div>
+                        <div className="sr">
+                          <div><div className="sr-lbl">Accent Color</div><div className="sr-desc">Dashboard theme</div></div>
+                          <div style={{display:'flex',gap:7}}>
+                            {['#f59e0b','#6366f1','#10b981','#ef4444','#8b5cf6'].map(c=>(
+                              <div key={c} className={`swatch${userSettings.accentColor===c?' sel':''}`} style={{background:c}} onClick={()=>saveSettings({accentColor:c})}/>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>}
+                    {settingsTab==='notif'&&<div className="ss active">
+                      <div className="ss-title">Notifications</div>
+                      <div className="ss-sub">What you get notified about</div>
+                      <div className="s-card">
+                        {([
+                          {key:'notifTaskReminders' as const, l:'Task Reminders', d:'Before deadlines'},
+                          {key:'notifAiInsights' as const, l:'AI Insights', d:'Task priority & tips'},
+                          {key:'notifSessionPrompts' as const, l:'Session Prompts', d:'Study reminders'},
+                          {key:'notifAchievements' as const, l:'Achievements', d:'Streaks & goals'},
+                        ]).map(r=>(
+                          <div key={r.key} className="sr">
+                            <div><div className="sr-lbl">{r.l}</div><div className="sr-desc">{r.d}</div></div>
+                            <label className="toggle">
+                              <input type="checkbox" checked={userSettings[r.key]} onChange={e=>saveSettings({[r.key]:e.target.checked})}/>
+                              <span className="tslider"/>
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    </div>}
                     {settingsTab==='security'&&<div className="ss active"><div className="ss-title">Security</div><div className="ss-sub">Account security settings</div><div className="s-card"><div className="sr"><div><div className="sr-lbl">Password</div><div className="sr-desc">Changed 30 days ago</div></div><button className="btn btn-ghost" style={{fontSize:12,padding:'6px 12px'}}>Change</button></div><div className="sr"><div><div className="sr-lbl">Two-Factor Auth</div><div className="sr-desc">Extra security</div></div><label className="toggle"><input type="checkbox"/><span className="tslider"/></label></div><div className="sr"><div><div className="sr-lbl">Active Sessions</div><div className="sr-desc">1 device signed in</div></div><button className="btn btn-ghost" style={{fontSize:12,padding:'6px 12px'}}>View</button></div></div></div>}
                     {settingsTab==='danger'&&<div className="ss active"><div className="ss-title" style={{color:'var(--red)'}}>Danger Zone</div><div className="ss-sub">Irreversible — proceed carefully</div><div className="danger-box"><div style={{fontSize:13,fontWeight:700,color:'var(--red)',marginBottom:12}}>⚠️ Irreversible Actions</div><div style={{display:'flex',flexDirection:'column',gap:10}}>{[{t:'Clear All Data',d:'Delete sessions, tasks & analytics'},{t:'Delete Account',d:'Permanently remove all data'}].map(a=><div key={a.t} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:12,background:'rgba(239,68,68,.05)',border:'1px solid rgba(239,68,68,.15)',borderRadius:10,gap:12}}><div><div style={{fontSize:13,fontWeight:600}}>{a.t}</div><div style={{fontSize:12,color:'var(--mut)'}}>{a.d}</div></div><button className="btn btn-red" style={{fontSize:12}} onClick={()=>a.t.includes('Account')?router.push('/'):showToast('⚠️ This cannot be undone!')}>Delete</button></div>)}</div></div></div>}
                   </div>
@@ -1342,6 +1561,22 @@ export default function DashboardPage() {
           </button>
         </nav>
       </div>
+
+      {deleteConfirm && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:9998,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 20px',backdropFilter:'blur(4px)'}}>
+          <div style={{background:'var(--sur2)',border:'1px solid var(--bdr2)',borderRadius:16,padding:'24px 22px',maxWidth:340,width:'100%',boxShadow:'0 24px 64px rgba(0,0,0,.6)'}}>
+            <div style={{width:44,height:44,borderRadius:12,background:'rgba(239,68,68,.12)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,marginBottom:14}}>🗑</div>
+            <div style={{fontSize:16,fontWeight:800,marginBottom:6}}>Delete task?</div>
+            <div style={{fontSize:13,color:'var(--tx2)',marginBottom:20,lineHeight:1.5}}>
+              "<span style={{color:'var(--tx)',fontWeight:600}}>{deleteConfirm.title}</span>" will be permanently removed.
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <button className="btn btn-ghost" style={{flex:1}} onClick={()=>setDeleteConfirm(null)}>Cancel</button>
+              <button className="btn btn-red" style={{flex:1}} onClick={()=>{deleteTask(deleteConfirm.id);setDeleteConfirm(null)}}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div id="toast"/>
 
