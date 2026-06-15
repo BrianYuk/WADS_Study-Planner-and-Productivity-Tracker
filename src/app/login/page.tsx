@@ -2,6 +2,8 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { signIn } from 'next-auth/react'
+import Logo from '@/components/Logo'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -9,6 +11,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [showPwd, setShowPwd] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
   const [error, setError] = useState('')
 
   async function handleSubmit(e: React.FormEvent) {
@@ -25,9 +28,14 @@ export default function LoginPage() {
     finally { setLoading(false) }
   }
 
+  async function handleGoogleSignIn() {
+    setError(''); setGoogleLoading(true)
+    await signIn('google', { callbackUrl: '/api/auth/oauth-bridge' })
+  }
+
   return (
     <>
-      <style dangerouslySetInnerHTML={{__html:`
+      <style dangerouslySetInnerHTML={{__html: `
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&display=swap');
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
         body{background:#090b12;color:#f1f5f9;font-family:'DM Sans',sans-serif;-webkit-tap-highlight-color:transparent;}
@@ -37,10 +45,6 @@ export default function LoginPage() {
         .bg-grid{position:fixed;inset:0;background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
         .page{min-height:100vh;display:flex;position:relative;}
         .left{flex:1;display:flex;flex-direction:column;justify-content:center;padding:60px;position:relative;z-index:1;}
-        .logo{display:flex;align-items:center;gap:10px;text-decoration:none;margin-bottom:50px;}
-        .logo-icon{width:36px;height:36px;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;}
-        .logo-text{font-size:16px;font-weight:800;color:#f1f5f9;}
-        .logo-text span{color:#f59e0b;}
         .left h1{font-size:clamp(28px,3.5vw,48px);font-weight:900;line-height:1.1;letter-spacing:-0.03em;margin-bottom:14px;}
         .left h1 em{color:#f59e0b;font-style:normal;}
         .left p{font-size:15px;color:#64748b;line-height:1.65;max-width:380px;margin-bottom:36px;}
@@ -78,14 +82,14 @@ export default function LoginPage() {
         .spin{width:16px;height:16px;border:2px solid rgba(0,0,0,.3);border-top-color:#000;border-radius:50%;animation:spin .7s linear infinite;}
         @keyframes spin{to{transform:rotate(360deg);}}
         @media(max-width:640px){.left{display:none;}.right{width:100%;padding:24px 16px;min-height:100vh;align-items:flex-start;padding-top:80px;}.page{flex-direction:column;}}
-      `}}/>
+      `}} />
       <div className="blob blob1"/><div className="blob blob2"/><div className="bg-grid"/>
       <div style={{position:'fixed',top:16,left:16,zIndex:100}}>
         <Link href="/" style={{display:'flex',alignItems:'center',gap:8,background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.1)',borderRadius:9,padding:'7px 13px',fontSize:13,fontWeight:600,color:'#94a3b8',textDecoration:'none'}}>← Back</Link>
       </div>
       <div className="page">
         <div className="left">
-          <Link href="/" className="logo"><div className="logo-icon">⚡</div><div className="logo-text">Kira<span>Flow</span></div></Link>
+          <Logo className="mb-[50px]" iconSize={32} />
           <h1>Study smarter,<br/>not <em>harder.</em></h1>
           <p>AI-powered task prioritization, a study Q&A assistant, and smart scheduling — built for students who want to make every session count.</p>
           {[{ic:'🤖',t:'AI Task Prioritization',d:'Groq ranks by urgency & importance'},{ic:'💬',t:'Ask Kira (Study Q&A)',d:'Get step-by-step study help instantly'},{ic:'📊',t:'Analytics',d:'Track focus, streaks & patterns'}].map(p=>(
@@ -109,7 +113,11 @@ export default function LoginPage() {
               </div>
               <button type="submit" className="submit" disabled={loading}>{loading?<><div className="spin"/>Signing in...</>:'Sign In →'}</button>
             </form>
-            {/* Google OAuth implemented but disabled for demo — requires production credentials */}
+            <div className="divider">or</div>
+            <button type="button" className="google-btn" disabled={googleLoading} onClick={handleGoogleSignIn}>
+              {googleLoading?<div className="spin"/>:<svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84c-.21 1.13-.85 2.09-1.81 2.73v2.27h2.92c1.71-1.57 2.69-3.88 2.69-6.64z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.81 5.96-2.18l-2.92-2.27c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.71H.96v2.34C2.44 15.98 5.48 18 9 18z"/><path fill="#FBBC05" d="M3.97 10.7c-.18-.54-.28-1.11-.28-1.7s.1-1.16.28-1.7V4.96H.96A8.996 8.996 0 0 0 0 9c0 1.45.35 2.83.96 4.04l3.01-2.34z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0 5.48 0 2.44 2.02.96 4.96l3.01 2.34C4.68 5.16 6.66 3.58 9 3.58z"/></svg>}
+              {googleLoading?'Redirecting...':'Continue with Google'}
+            </button>
             <button className="demo" onClick={()=>{setEmail('demo@kiraflow.app');setPassword('Demo1234!')}}>🎮 Fill Demo Credentials</button>
             <div className="bottom">New here? <Link href="/register">Create a free account</Link></div>
           </div>
