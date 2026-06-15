@@ -499,20 +499,5 @@ docker compose logs app
 
 ---
 
-## Week-by-Week Progress
+## Video demo link
 
-| Week | Deliverable | Status |
-|------|------------|--------|
-| 1 | Architecture, tech stack, project selection | Complete |
-| 2 | USR (User Persona, User Journey) + SRS | Complete |
-| 3 | Mockup Design + Routing Design | Complete |
-| 4 | Frontend Testing | Complete |
-| 5 | API Documentation (Swagger) | Complete |
-| 6 | API Testing Results (Postman) | Complete |
-| 7 | DB Schema and ORM | Complete |
-| 8 | Auth and Authorization | Complete |
-| 9 | Web Security + Security Testing | Complete |
-| 10 | Docker + CI/CD + Deployment | Complete |
-| 11 | AI Design + Testing | Complete |
-| 12 | Final Project Submission | Complete |
-| 13 | Final Demo & Presentation | In Progress |
