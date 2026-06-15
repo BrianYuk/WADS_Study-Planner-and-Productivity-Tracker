@@ -19,7 +19,7 @@
 | Name | Student ID | Role | GitHub Username |
 |------|-----------|------|-----------------|
 | [Member 1] | [ID] | Frontend + AI Integration | @username1 |
-| [Member 2] | [ID] | Backend + Database | @username2 |
+| [Brian Yuktipada] | [2802523004] | Backend + Database | @BrianYuk |
 | [Member 3] | [ID] | DevOps + Security + Testing | @username3 |
 
 ---
@@ -379,7 +379,7 @@ email/password (JWT) and Google sign-in (OAuth) authentication work on the live 
 - Security work: Input validation on frontend forms
 - AI-related work: AI prioritization UI, Ask Kira chat component
 
-**Student Name: [Member 2]**
+**Student Name: [Brian Yuktipada]**
 - Features implemented: All API routes, Prisma schema, business logic
 - API endpoints handled: All /api/auth/*, /api/goals/*, /api/sessions/*
 - Tests written: API-01 to API-07
@@ -437,7 +437,7 @@ We declare that:
 
 *Signed by Group Members:*
 - [Member 1 Name] – [Student ID]
-- [Member 2 Name] – [Student ID]
+- [Brian Yuktipada] – [2802523004]
 - [Member 3 Name] – [Student ID]
 
 ---
