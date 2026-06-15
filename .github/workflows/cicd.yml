@@ -93,6 +93,8 @@ jobs:
           REFRESH_TOKEN_EXPIRES_IN=7d
           NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}
           NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL }}
+          AUTH_TRUST_HOST=true
+          NEXTAUTH_URL_INTERNAL=${{ secrets.NEXTAUTH_URL }}
           GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
           GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
@@ -110,7 +112,7 @@ jobs:
       - name: Deploy Kira Flow
         run: |
           docker compose pull app
-          docker compose up -d --no-deps app
+          docker compose up -d --no-deps --force-recreate app
 
       - name: Remove temporary env file
         if: always()
