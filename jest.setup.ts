@@ -1,5 +1,12 @@
+/// <reference types="node" />
 import '@testing-library/jest-dom'
 import { TextEncoder, TextDecoder } from 'util'
+
+// Test environment defaults — ensure auth/JWT code has required secrets in tests
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-key-for-jest-min-32-characters'
+process.env.JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m'
+process.env.NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET || 'test-nextauth-secret'
+process.env.APP_SECRET = process.env.APP_SECRET || 'test-app-secret'
 
 // TextEncoder/Decoder polyfill
 if (typeof global.TextEncoder === 'undefined') {

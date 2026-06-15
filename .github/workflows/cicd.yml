@@ -39,6 +39,10 @@ jobs:
         run: npm test -- --passWithNoTests --forceExit --testPathPattern="tests/unit"
         env:
           CI: true
+          JWT_SECRET: test-jwt-secret-key-for-ci-pipeline-min-32-chars
+          JWT_EXPIRES_IN: 15m
+          NEXTAUTH_SECRET: test-nextauth-secret-for-ci-pipeline
+          APP_SECRET: test-app-secret-key
 
   # ── Job 2: Build Docker image and push to Docker Hub ───────────────
   build:
