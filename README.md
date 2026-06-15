@@ -18,9 +18,9 @@
 
 | Name | Student ID | Role | GitHub Username |
 |------|-----------|------|-----------------|
-| [William Ekapanna Rusmana] | [2802523111] | Frontend + AI Integration | @username1 |
+| [William Ekapanna Rusmana] | [2802523111] | Frontend + AI Integration | @WILLIAM ER |
 | [Brian Yuktipada] | [2802523004] | Backend + Database | @BrianYuk |
-| [Yifan Zhou] | [2802572246] | DevOps + Security + Testing | @username3 |
+| [Yifan Zhou] | [2802572246] | DevOps + Security + Testing | @yfz373 |
 
 ---
 
