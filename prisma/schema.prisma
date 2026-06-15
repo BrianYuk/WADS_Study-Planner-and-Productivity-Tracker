@@ -1,6 +1,9 @@
 // prisma/schema.prisma
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // Build engines for both the local dev platform and the Alpine (musl) container.
+  // "linux-musl-openssl-3.0.x" matches node:20-alpine with openssl 3 installed.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
