@@ -345,13 +345,7 @@ docker compose --profile dev up -d
 
 ### 11.2 Production Environment
 
-**Environment variables** (see `.env.example`):
-```
-DATABASE_URL       – PostgreSQL connection string
-JWT_SECRET         – Min 32 chars, randomly generated
-OPENAI_API_KEY     – Stored in server env only, never exposed to client
-NODE_ENV           – "production" in deployment
-```
+**Environment variables:** All secrets stored in .env file (not committed to git).
 
 **Secrets handling:** All secrets injected via environment variables. `.env` file is in `.gitignore`. GitHub Actions uses repository secrets for CI/CD pipeline.
 
