@@ -18,9 +18,9 @@
 
 | Name | Student ID | Role | GitHub Username |
 |------|-----------|------|-----------------|
-| [Member 1] | [ID] | Frontend + AI Integration | @username1 |
+| [William Ekapanna Rusmana] | [2802523111] | Frontend + AI Integration | @username1 |
 | [Brian Yuktipada] | [2802523004] | Backend + Database | @BrianYuk |
-| [Member 3] | [ID] | DevOps + Security + Testing | @username3 |
+| [Yifan Zhou] | [2802572246] | DevOps + Security + Testing | @username3 |
 
 ---
 
@@ -368,7 +368,7 @@ email/password (JWT) and Google sign-in (OAuth) authentication work on the live 
 
 > Each team member must fill in their own section.
 
-**Student Name: [Member 1]**
+**Student Name: [William Ekapanna Rusmana]**
 - Features implemented: Dashboard UI, Task components, Timer widget, Responsive layout
 - API endpoints handled: GET/POST /api/tasks, GET /api/analytics/dashboard
 - Tests written: FE-01 to FE-05 (frontend tests)
@@ -382,7 +382,7 @@ email/password (JWT) and Google sign-in (OAuth) authentication work on the live 
 - Security work: JWT middleware, rate limiting, Zod validation
 - AI-related work: aiService.ts, AI endpoints, prompt engineering
 
-**Student Name: [Member 3]**
+**Student Name: [Yifan Zhou]**
 - Features implemented: Docker, GitHub Actions, deployment
 - API endpoints handled: /api/admin/*, /api/notifications/*
 - Tests written: SEC-01 to SEC-07, AI testing suite
@@ -432,9 +432,9 @@ We declare that:
 - All group members understand the full system and can explain any part
 
 *Signed by Group Members:*
-- [Member 1 Name] – [Student ID]
+- [William Ekapanna Rusmana] – [2802523111]
 - [Brian Yuktipada] – [2802523004]
-- [Member 3 Name] – [Student ID]
+- [Yifan Zhou] – [2802572246]
 
 ---
 
