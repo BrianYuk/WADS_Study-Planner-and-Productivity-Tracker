@@ -1,0 +1,114 @@
+name: Kira Flow CI/CD
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - "README.md"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
+
+jobs:
+  # ── Job 1: Code Quality (lint + test) ──────────────────────────────
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma generate
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci?sslmode=disable
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint || true
+
+      - name: Test
+        run: npm test -- --passWithNoTests --forceExit --testPathPattern="tests/unit"
+        env:
+          CI: true
+
+  # ── Job 2: Build Docker image and push to Docker Hub ───────────────
+  build:
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and Push Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/kira-flow:latest
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/kira-flow:latest
+          cache-to: type=inline
+
+  # ── Job 3: Deploy to CS server via self-hosted runner ──────────────
+  deploy:
+    needs: build
+    runs-on: self-hosted
+    env:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Create .env.production from GitHub Secrets
+        run: |
+          cat > .env.production <<ENVEOF
+          NODE_ENV=production
+          NEXT_PUBLIC_APP_URL=${{ secrets.NEXT_PUBLIC_APP_URL }}
+          APP_SECRET=${{ secrets.APP_SECRET }}
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          JWT_EXPIRES_IN=15m
+          REFRESH_TOKEN_EXPIRES_IN=7d
+          NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}
+          NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL }}
+          GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
+          ENVEOF
+
+      - name: Login to Docker Hub (pull)
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Pull Latest Image
+        run: docker pull ${{ secrets.DOCKER_USERNAME }}/kira-flow:latest
+
+      - name: Deploy Kira Flow
+        run: |
+          docker compose pull app
+          docker compose up -d --no-deps app
+
+      - name: Remove temporary env file
+        if: always()
+        run: rm -f .env.production
+
+      - name: Cleanup dangling images
+        run: docker image prune -f

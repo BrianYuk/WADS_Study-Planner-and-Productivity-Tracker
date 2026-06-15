@@ -57,12 +57,12 @@ COPY --from=builder /app/node_modules/.prisma            ./node_modules/.prisma
 
 USER nextjs
 
-EXPOSE 3000
-ENV PORT=3000
+EXPOSE 3019
+ENV PORT=3019
 ENV HOSTNAME="0.0.0.0"
 
 # Health check — Docker will restart the container if this fails 3 times
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD wget -qO- http://localhost:3000/api/health || exit 1
+  CMD wget -qO- http://localhost:3019/api/health || exit 1
 
 CMD ["node", "server.js"]
