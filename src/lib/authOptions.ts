@@ -10,6 +10,14 @@ export const authOptions: NextAuthOptions = {
     GoogleProvider({
       clientId:     process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      // Behind the CS-server reverse proxy NextAuth otherwise builds the
+      // redirect_uri from the internal host (0.0.0.0:3019). Pin it explicitly
+      // to the public callback URL so Google redirects back to a reachable URL.
+      authorization: {
+        params: {
+          redirect_uri: `${process.env.NEXTAUTH_URL}/api/auth/callback/google`,
+        },
+      },
     }),
 
     // ── Email / Password ──────────────────────────────────────────────────
@@ -39,22 +47,6 @@ export const authOptions: NextAuthOptions = {
 
   // ── Callbacks ─────────────────────────────────────────────────────────────
   callbacks: {
-    // Force redirects onto the public URL (the CS-server reverse proxy
-    // otherwise reports the internal host 0.0.0.0:3019 to NextAuth).
-    async redirect({ url, baseUrl }) {
-      const publicUrl = process.env.NEXTAUTH_URL || baseUrl
-      // Relative URLs → prefix with the public URL
-      if (url.startsWith('/')) return `${publicUrl}${url}`
-      // Anything pointing at the internal host → rewrite to public dashboard
-      if (url.includes('0.0.0.0') || url.includes(':3019')) return `${publicUrl}/dashboard`
-      // Same-origin URLs are fine; otherwise fall back to public URL
-      try {
-        return new URL(url).origin === new URL(publicUrl).origin ? url : publicUrl
-      } catch {
-        return publicUrl
-      }
-    },
-    
     // Upsert Google users into our PostgreSQL database on first sign-in
     async signIn({ user, account }) {
       if (account?.provider === 'google') {
