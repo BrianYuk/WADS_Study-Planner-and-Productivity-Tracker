@@ -1,4 +1,6 @@
 import Link from 'next/link'
+import Logo from '@/components/Logo'
+
 
 export default function LandingPage() {
   return (
@@ -24,6 +26,7 @@ export default function LandingPage() {
         .btn-cta{background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;padding:14px 32px;border-radius:13px;font-size:16px;font-weight:700;}
         .btn-cta:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(245,158,11,.4);}
         .btn-outline{background:transparent;border:1px solid rgba(245,158,11,.4);color:#f59e0b;padding:14px 28px;border-radius:13px;font-size:16px;font-weight:700;}
+        .feats{padding:0 60px 80px 60px;position:relative;z-index:1;}
         .hero{padding:110px 60px 80px;text-align:center;position:relative;z-index:1;}
         .hero-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);border-radius:100px;padding:5px 14px;font-size:11px;font-weight:700;color:#f59e0b;letter-spacing:.05em;text-transform:uppercase;margin-bottom:24px;}
         .hero-h1{font-size:clamp(36px,6vw,72px);font-weight:900;line-height:1.05;letter-spacing:-0.04em;margin-bottom:20px;}
@@ -71,7 +74,7 @@ export default function LandingPage() {
       `}}/>
       <div className="blob blob1"/><div className="blob blob2"/><div className="bg-grid"/>
       <nav>
-        <Link href="/" className="nav-logo"><div className="logo-icon">⚡</div><div className="logo-text">Kira<span>Flow</span></div></Link>
+        <Logo href="/dashboard" iconSize={28} textClassName="text-sm" />
         <div className="nav-links">
           <Link href="/login" className="btn btn-ghost">Sign In</Link>
           <Link href="/register" className="btn btn-amber">Get Started →</Link>
@@ -89,6 +92,13 @@ export default function LandingPage() {
           <div><div className="stat-n">3<span>+</span></div><div className="stat-l">AI features</div></div>
           <div><div className="stat-n">100<span>%</span></div><div className="stat-l">Free to use</div></div>
           <div><div className="stat-n">24<span>/7</span></div><div className="stat-l">Available</div></div>
+        </div>
+      </div>
+      <div className="flex items-center justify-center gap-2.5 pb-10 relative z-[1]">
+        <img src="/KiraFlowLogo.png" alt="Kira Flow logo" className="w-18 h-auto shrink-0 object-contain opacity-90" />
+        <div className="leading-tight">
+          <p className="text-2xl font-extrabold text-slate-100 tracking-tight">Kira</p>
+          <p className="text-2xl font-extrabold text-amber-500 tracking-tight">Flow</p>
         </div>
       </div>
       <div className="feats">

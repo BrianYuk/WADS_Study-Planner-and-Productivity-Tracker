@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     const [tasks, total] = await Promise.all([
       prisma.task.findMany({
         where,
-        include: { subtasks: true },
+        include: { subtasks: { orderBy: { createdAt: 'asc' } } },
         orderBy: [{ aiPriority: 'desc' }, { dueDate: 'asc' }, { createdAt: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
         estimatedMins: data.estimatedMins,
         tags: data.tags,
       },
-      include: { subtasks: true },
+      include: { subtasks: { orderBy: { createdAt: 'asc' } } },
     })
 
     return NextResponse.json({ task }, { status: 201 })

@@ -14,14 +14,17 @@ const createTaskTool: Groq.Chat.Completions.ChatCompletionTool = {
   type: 'function',
   function: {
     name: 'create_task',
-    description: 'Create a new task, assignment, or reminder on the student\'s to-do list. Call this whenever the user explicitly asks to add, create, or schedule a task.',
+    description: 'Create a new task, assignment, or reminder on the student\'s to-do list with optional subtasks, description, and deadline. Call this whenever the user explicitly asks to add, create, or schedule a task.',
     parameters: {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Short, clear title for the task, e.g. "Math Homework".' },
-        subject: { type: 'string', description: 'Subject or category for the task, e.g. "Math", "School". Omit if not specified.' },
-        priority: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH', 'URGENT'], description: 'Priority of the task. Default to MEDIUM if not specified.' },
-        dueDate: { type: 'string', description: 'Due date in YYYY-MM-DD format. Convert any date format given by the user (e.g. DD/MM/YYYY) into YYYY-MM-DD. Omit if no due date was given.' },
+        description: { type: 'string', description: 'Optional longer description or notes about the task.' },
+        subject: { type: 'string', description: 'Subject or category, e.g. "Math", "Programming". Omit if not specified.' },
+        priority: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH', 'URGENT'], description: 'Priority level. Default MEDIUM if not specified.' },
+        dueDate: { type: 'string', description: 'Due date and time in ISO 8601 format YYYY-MM-DDTHH:MM. Convert any format (DD/MM/YYYY, "tomorrow", "next Monday") using today\'s date. Use T23:59 if only a date is given. Omit if no due date was given.' },
+        estimatedMins: { type: 'number', description: 'Estimated completion time in minutes. Omit if not specified.' },
+        subtasks: { type: 'array', items: { type: 'string' }, description: 'Optional list of subtask titles. Use when the user lists steps, or when breaking down a complex task would be helpful.' },
       },
       required: ['title'],
     },
@@ -40,7 +43,7 @@ export interface CreatedTask {
 // Parses the model's create_task tool-call arguments, creates the task, and
 // returns a confirmation message for the chat reply.
 async function createTaskFromArgs(userId: string, rawArgs: string): Promise<{ answer: string; task: CreatedTask | null }> {
-  let args: { title?: string; subject?: string; priority?: string; dueDate?: string } = {}
+  let args: { title?: string; description?: string; subject?: string; priority?: string; dueDate?: string; estimatedMins?: number; subtasks?: string[] } = {}
   try {
     args = JSON.parse(rawArgs)
   } catch {
@@ -62,20 +65,42 @@ async function createTaskFromArgs(userId: string, rawArgs: string): Promise<{ an
     if (!isNaN(parsed.getTime())) dueDate = parsed
   }
 
+  const estimatedMins = args.estimatedMins && args.estimatedMins > 0 ? Math.round(args.estimatedMins) : null
+
   const task = await prisma.task.create({
     data: {
       userId,
       title: sanitizeInput(title),
+      description: args.description ? sanitizeInput(args.description.trim().slice(0, 2000)) : null,
       subject: args.subject ? sanitizeInput(args.subject.trim().slice(0, 100)) : null,
       priority,
       dueDate,
+      estimatedMins,
       tags: [],
     },
   })
 
-  const dueStr = dueDate ? ` (due ${dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })})` : ''
+  const subtaskTitles = (args.subtasks || [])
+    .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+    .slice(0, 100)
+  if (subtaskTitles.length > 0) {
+    await prisma.subtask.createMany({
+      data: subtaskTitles.map(st => ({
+        taskId: task.id,
+        title: sanitizeInput(st.trim().slice(0, 255)),
+      })),
+    })
+  }
+
+  const dueStr = dueDate
+    ? ` (due ${dueDate.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })})`
+    : ''
   const subjStr = task.subject ? ` under ${task.subject}` : ''
-  const answer = `✅ Done! I've added "${task.title}"${subjStr} to your tasks${dueStr}.`
+  const estStr = estimatedMins
+    ? ` (~${estimatedMins < 60 ? `${estimatedMins}m` : `${Math.floor(estimatedMins / 60)}h${estimatedMins % 60 ? ` ${estimatedMins % 60}m` : ''}`})`
+    : ''
+  const subtasksStr = subtaskTitles.length > 0 ? ` with ${subtaskTitles.length} subtask${subtaskTitles.length > 1 ? 's' : ''}` : ''
+  const answer = `✅ Done! I've added "${task.title}"${subjStr}${estStr}${subtasksStr} to your tasks${dueStr}.`
 
   return { answer, task }
 }
@@ -186,7 +211,7 @@ Guidelines: be encouraging, use relevant examples, keep answers concise (200-400
 and guide students to understand rather than doing their homework for them.
 Focus on the subject: ${subject}.
 
-You can also manage the student's to-do list. If the user asks you to add, create, or schedule a task, assignment, or reminder, call the create_task function with the details extracted from their message. Today's date is ${today}; convert any date the user gives (e.g. DD/MM/YYYY) into YYYY-MM-DD format for dueDate.`
+You can also manage the student's to-do list. If the user asks you to add, create, or schedule a task, assignment, or reminder, call the create_task function with the details extracted from their message. You can set: title, description, subject, priority (LOW/MEDIUM/HIGH/URGENT), due date+time (ISO 8601 YYYY-MM-DDTHH:MM), estimated duration in minutes, and subtasks (array of step titles). Today's date is ${today}; convert any date/time format ("tomorrow", "next Monday", DD/MM/YYYY) to ISO 8601. If the user asks to break a task into steps, populate the subtasks array.`
 
   const messages = [
     { role: 'system' as const, content: systemPrompt },

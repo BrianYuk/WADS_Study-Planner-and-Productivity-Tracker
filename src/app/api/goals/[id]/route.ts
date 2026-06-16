@@ -11,6 +11,7 @@ const updateGoalSchema = z.object({
   targetValue: z.number().positive().optional(),
   currentValue: z.number().min(0).optional(),
   unit: z.string().max(50).optional(),
+  type: z.enum(['DAILY', 'WEEKLY', 'MONTHLY', 'SEMESTER']).optional(),
   status: z.enum(['ACTIVE', 'COMPLETED', 'CANCELLED']).optional(),
 })
 
@@ -67,6 +68,7 @@ export async function PATCH(
         ...(data.targetValue && { targetValue: data.targetValue }),
         ...(data.currentValue !== undefined && { currentValue: data.currentValue }),
         ...(data.unit && { unit: data.unit }),
+        ...(data.type && { type: data.type }),
         ...(data.status && { status: data.status }),
       },
     })

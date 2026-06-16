@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Logo from '@/components/Logo'
+import { playTaskCompleteSound, playMissionCompleteSound, setSoundEnabled } from '@/lib/sounds'
 
 
 type Subtask = {
@@ -61,6 +62,44 @@ const accentPalettes: Record<'dark'|'light', string[]> = {
 
 type Page = 'dashboard'|'tasks'|'kira'|'timer'|'calendar'|'calendarDay'|'goals'|'analytics'|'notifications'|'settings'
 
+const COMPLETION_GIFS = [
+  'Despicable Me Dancing GIF.gif',
+  'Dance Party Dancing GIF.gif',
+  'Excited Happy Birthday GIF.gif',
+  'Excited Season 2 GIF by The Office.gif',
+  'Dance Dancing GIF.gif',
+  'Super Mario Dancing GIF.gif',
+  'Happy Dance GIF by GONRYON._.O.gif',
+  'Celebrate Happy Birthday GIF by Sesame Street.gif',
+  'Party Congrats GIF.gif',
+  'Rock And Roll Dance GIF by Pocoyo.gif',
+  'Happy Cat GIF.gif',
+  'Harry Potter Party Hard GIF.gif',
+  'gif.gif',
+  'Rick Ross Dancing GIF.gif',
+  'Happy Dance GIF by ikas.gif',
+  'Excited Amy Adams GIF.gif',
+  'Excited Proud Of You GIF by Moonbug.gif',
+  'Very Happy Yes GIF by La Guarimba Film Festival.gif',
+  'Champions League Football GIF by UEFA.gif',
+  'Happy Chris Pratt GIF by Parks and Recreation.gif',
+  'Feeling Myself Dancing GIF by Kino Lorber.gif',
+  'Happy Fun GIF by Potatoz by 9GAG.gif',
+  'One Piece Smiling GIF by NETFLIX.gif',
+  'Season 6 Omg GIF by The Office.gif',
+  'Happy Fun GIF by Potatoz by 9GAG (1).gif',
+  'Happy Pokemon GIF by Pokémon_JPN.gif',
+  'Excited Season 6 GIF by The Office.gif',
+  'Cat Basketball GIF by sillynub.gif',
+  'Mason GIF.gif',
+  'Fragrance GIF by Noel Deyzel.gif',
+  'Happy Yes It Is GIF.gif',
+  'winning the big bang theory GIF.gif',
+  'happy bugs bunny GIF by Looney Tunes.gif',
+  'gif (1).gif',
+  'Goat Bleating GIF.gif',
+]
+
 export default function DashboardPage() {
   const router = useRouter()
   const [page, setPage] = useState<Page>('dashboard')
@@ -84,6 +123,7 @@ export default function DashboardPage() {
   return n.type === notifFilter
 })
   const [settingsTab, setSettingsTab] = useState('profile')
+  const [completionGif, setCompletionGif] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<{id:string, title:string}|null>(null)
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [settingsSaved, setSettingsSaved] = useState(false)
@@ -94,8 +134,12 @@ export default function DashboardPage() {
     timerAutoStart: true,
     timerSound: true,
     timerLongBreak: false,
+    soundEffects: true,
   })
   const timerRef = useRef<ReturnType<typeof setInterval>|null>(null)
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout>|null>(null)
+  const holdIntervalRef = useRef<ReturnType<typeof setInterval>|null>(null)
+  const gifHideRef = useRef<ReturnType<typeof setTimeout>|null>(null)
 
   // ── Real API state ──────────────────────────────────────────────
   const [tasks, setTasks] = useState<Task[]>([])
@@ -111,6 +155,9 @@ export default function DashboardPage() {
   const [editError, setEditError] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [editSubtaskInput, setEditSubtaskInput] = useState('')
+  const [editingSubtaskId, setEditingSubtaskId] = useState<string|null>(null)
+  const [editingSubtaskTitle, setEditingSubtaskTitle] = useState('')
+  const [expandedTaskId, setExpandedTaskId] = useState<string|null>(null)
   const [aiPrioritizing, setAiPrioritizing] = useState(false)
   const [userName, setUserName] = useState('Student')
   const [userEmail, setUserEmail] = useState('')
@@ -129,6 +176,12 @@ export default function DashboardPage() {
   const [goals, setGoals] = useState<Goal[]>([])
   const [newGoal, setNewGoal] = useState({ title:'', type:'WEEKLY', targetValue:'', unit:'hours', targetDate:'' })
   const [goalError, setGoalError] = useState('')
+  // Edit mission modal
+  const [editingGoal, setEditingGoal] = useState<Goal|null>(null)
+  const [editGoalForm, setEditGoalForm] = useState({ title:'', type:'WEEKLY', targetValue:'', currentValue:'', unit:'hours', targetDate:'', status:'ACTIVE', gap:'1' })
+  const [editGoalError, setEditGoalError] = useState('')
+  const [editGoalSaving, setEditGoalSaving] = useState(false)
+  const [goalDeleteConfirm, setGoalDeleteConfirm] = useState<{id:string, title:string}|null>(null)
   // Sessions + Analytics state
   const [sessionStart, setSessionStart] = useState<number|null>(null)
   const [sessionSubject, setSessionSubject] = useState('')
@@ -138,6 +191,7 @@ export default function DashboardPage() {
     tasks: { total:number, todo:number, inProgress:number, completed:number, cancelled:number }
     study: { totalMins7Days:number, sessionCount7Days:number, avgFocusScore:number }
     dailyData: DailyData[]
+    monthlyData: DailyData[]
     subjectBreakdown: SubjectData[]
   }
   const [analytics, setAnalytics] = useState<Analytics|null>(null)
@@ -154,7 +208,7 @@ export default function DashboardPage() {
   const [dayNewPriority, setDayNewPriority] = useState<Task['priority']>('MEDIUM')
   const [dayTaskError, setDayTaskError] = useState('')
 
-  const titles: Record<Page,string> = {dashboard:'Dashboard',tasks:'Tasks',kira:'Ask Kira',timer:'Study Timer',calendar:'Calendar',calendarDay:'Day Planner',goals:'Goals',analytics:'Analytics',notifications:'Notifications',settings:'Settings'}
+  const titles: Record<Page,string> = {dashboard:'Dashboard',tasks:'Tasks',kira:'Ask Kira',timer:'Study Timer',calendar:'Calendar',calendarDay:'Day Planner',goals:'Missions',analytics:'Analytics',notifications:'Notifications',settings:'Settings'}
   const mainNav: {id:Page,icon:string,label:string,badge?:string}[] = [
     {id:'dashboard',icon:'🏠',label:'Dashboard'},
     {id:'tasks',icon:'✅',label:'Tasks',badge:'4'},
@@ -163,7 +217,7 @@ export default function DashboardPage() {
     {id:'calendar',icon:'📅',label:'Calendar'},
   ]
   const moreNav: {id:Page,icon:string,label:string}[] = [
-    {id:'goals',icon:'🎯',label:'Goals'},
+    {id:'goals',icon:'🎯',label:'Missions'},
     {id:'analytics',icon:'📊',label:'Analytics'},
     {id:'notifications',icon:'🔔',label:'Notifications'},
     {id:'settings',icon:'⚙️',label:'Settings'},
@@ -344,7 +398,8 @@ export default function DashboardPage() {
       })
       if (res.ok) {
         const data = await res.json()
-        for (const title of newSubtasks) {
+        const allSubtasks = [...newSubtasks, ...(newSubtaskInput.trim() ? [newSubtaskInput.trim()] : [])]
+        for (const title of allSubtasks) {
           await fetch(`/api/tasks/${data.task.id}/subtasks`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -417,7 +472,7 @@ export default function DashboardPage() {
         setTasks((prev:Task[]) => prev.map((t:Task) => t.id === editingTask.id ? data.task : t))
         setEditingTask(null)
         showToast('✅ Task updated!')
-        if (data.task.status === 'COMPLETED' && !wasCompleted) await updateGoalsOnTaskComplete()
+        if (data.task.status === 'COMPLETED' && !wasCompleted) { playTaskCompleteSound(); triggerCompletionPopup(); await updateGoalsOnTaskComplete() }
       } else {
         const err = await res.json()
         setEditError(err.error || 'Failed to update task')
@@ -457,6 +512,14 @@ export default function DashboardPage() {
   async function toggleSubtask(taskId: string, subtask: Subtask) {
     const completed = !subtask.completed
     applySubtaskUpdate(taskId, (subtasks) => subtasks.map(s => s.id === subtask.id ? { ...s, completed } : s))
+
+    // Precompute before optimistic state change: will every subtask be done after this toggle?
+    const parentTask = tasks.find(t => t.id === taskId)
+    const willAllComplete = completed
+      && parentTask != null
+      && parentTask.subtasks.length > 0
+      && parentTask.subtasks.every(s => s.id === subtask.id ? true : s.completed)
+
     try {
       const res = await fetch(`/api/tasks/${taskId}/subtasks/${subtask.id}`, {
         method: 'PATCH',
@@ -466,6 +529,8 @@ export default function DashboardPage() {
       if (!res.ok) {
         applySubtaskUpdate(taskId, (subtasks) => subtasks.map(s => s.id === subtask.id ? { ...s, completed: !completed } : s))
         showToast('⚠️ Could not update subtask')
+      } else if (willAllComplete && parentTask && parentTask.status !== 'COMPLETED') {
+        await toggleTask(parentTask)
       }
     } catch {
       applySubtaskUpdate(taskId, (subtasks) => subtasks.map(s => s.id === subtask.id ? { ...s, completed: !completed } : s))
@@ -489,6 +554,49 @@ export default function DashboardPage() {
     }
   }
 
+  async function saveSubtaskTitle(taskId: string, subtaskId: string, title: string) {
+    const trimmed = title.trim()
+    setEditingSubtaskId(null)
+    setEditingSubtaskTitle('')
+    if (!trimmed) return
+    applySubtaskUpdate(taskId, subtasks => subtasks.map(s => s.id === subtaskId ? { ...s, title: trimmed } : s))
+    try {
+      await fetch(`/api/tasks/${taskId}/subtasks/${subtaskId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: trimmed }),
+      })
+    } catch {
+      showToast('⚠️ Could not update subtask')
+    }
+  }
+
+  // ── Completion popup ──────────────────────────────────────────
+  // Show a random celebration GIF. With autoHideMs the GIF clears itself after
+  // that long; pass undefined to keep it on screen (it loops) until hideCompletionGif().
+  function showCompletionGif(autoHideMs?: number) {
+    const name = COMPLETION_GIFS[Math.floor(Math.random() * COMPLETION_GIFS.length)]
+    if (gifHideRef.current) { clearTimeout(gifHideRef.current); gifHideRef.current = null }
+    setCompletionGif(`/completion_gifs/${encodeURIComponent(name)}`)
+    if (autoHideMs != null) {
+      gifHideRef.current = setTimeout(() => { setCompletionGif(null); gifHideRef.current = null }, autoHideMs)
+    }
+  }
+  function hideCompletionGif() {
+    if (gifHideRef.current) { clearTimeout(gifHideRef.current); gifHideRef.current = null }
+    setCompletionGif(null)
+  }
+  // Tasks: brief 4s celebration.
+  function triggerCompletionPopup() {
+    showCompletionGif(4000)
+  }
+  // Missions: keep the GIF looping until the trumpet fanfare finishes (with a
+  // 15s backstop in case the audio callback never arrives, e.g. sound disabled).
+  function triggerMissionCelebration() {
+    showCompletionGif(15000)
+    playMissionCompleteSound(() => hideCompletionGif())
+  }
+
   // ── Toggle task complete ──────────────────────────────────────
   async function toggleTask(task: Task) {
     const prevStatus = task.status
@@ -496,7 +604,7 @@ export default function DashboardPage() {
 
     // Optimistic update — flip the checkbox instantly, sync to server in background
     setTasks((prev:Task[]) => prev.map((t:Task) => t.id === task.id ? { ...t, status: newStatus } : t))
-    if (newStatus === 'COMPLETED') showToast('✅ Task complete!')
+    if (newStatus === 'COMPLETED') { playTaskCompleteSound(); showToast('✅ Task complete!'); triggerCompletionPopup() }
 
     try {
       const res = await fetch(`/api/tasks/${task.id}`, {
@@ -553,8 +661,8 @@ export default function DashboardPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: '🏆 Goal Achieved!',
-          message: `You completed your goal: "${goalTitle}"`,
+          title: '🏆 Mission Accomplished!',
+          message: `You completed your mission: "${goalTitle}"`,
           type: 'ACHIEVEMENT',
         }),
       })
@@ -577,7 +685,8 @@ export default function DashboardPage() {
           }),
         })
         if (isNowComplete) {
-          showToast(`🎉 Goal complete: ${goal.title}!`)
+          triggerMissionCelebration()
+          showToast(`🎉 Mission complete: ${goal.title}!`)
           triggerGoalCompleteNotif(goal.title)
         }
       } catch {}
@@ -602,7 +711,8 @@ export default function DashboardPage() {
           }),
         })
         if (isNowComplete) {
-          showToast(`🎉 Goal complete: ${goal.title}!`)
+          triggerMissionCelebration()
+          showToast(`🎉 Mission complete: ${goal.title}!`)
           triggerGoalCompleteNotif(goal.title)
         }
       } catch {}
@@ -621,7 +731,8 @@ export default function DashboardPage() {
           }),
         })
         if (isNowComplete) {
-          showToast(`🎉 Goal complete: ${goal.title}!`)
+          triggerMissionCelebration()
+          showToast(`🎉 Mission complete: ${goal.title}!`)
           triggerGoalCompleteNotif(goal.title)
         }
       } catch {}
@@ -662,13 +773,97 @@ export default function DashboardPage() {
       if (res.ok) {
         setNewGoal({ title:'', type:'WEEKLY', targetValue:'', unit:'hours', targetDate:'' })
         setGoalFormOpen(false)
-        showToast('🎯 Goal created!')
+        showToast('🎯 Mission created!')
         fetchGoals()
       } else {
         const err = await res.json()
-        setGoalError(err.error || 'Failed to create goal')
+        setGoalError(err.error || 'Failed to create mission')
       }
     } catch { setGoalError('Network error') }
+  }
+
+  // ── Edit mission ──────────────────────────────────────────────
+  function toDateInput(iso?: string | null) {
+    if (!iso) return ''
+    const d = new Date(iso)
+    const pad = (n:number) => String(n).padStart(2,'0')
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`
+  }
+
+  function openEditGoal(goal: Goal) {
+    setEditingGoal(goal)
+    setEditGoalForm({
+      title: goal.title,
+      type: goal.type,
+      targetValue: String(goal.targetValue),
+      currentValue: String(goal.currentValue),
+      unit: goal.unit,
+      targetDate: toDateInput(goal.targetDate),
+      status: goal.status,
+      gap: goal.unit === 'hours' ? '0.5' : '1',
+    })
+    setEditGoalError('')
+  }
+
+  async function saveEditGoal() {
+    if (!editingGoal) return
+    if (!editGoalForm.title.trim()) { setEditGoalError('Title is required'); return }
+    if (!editGoalForm.targetValue || Number(editGoalForm.targetValue) <= 0) { setEditGoalError('Target must be a positive number'); return }
+    if (!editGoalForm.targetDate) { setEditGoalError('Target date is required'); return }
+    setEditGoalError('')
+    setEditGoalSaving(true)
+    try {
+      const targetValue = Number(editGoalForm.targetValue)
+      const currentValue = Math.max(0, Number(editGoalForm.currentValue) || 0)
+      // Keep status consistent with progress when not explicitly cancelled
+      let status = editGoalForm.status
+      if (status !== 'CANCELLED') status = currentValue >= targetValue ? 'COMPLETED' : 'ACTIVE'
+      const res = await fetch(`/api/goals/${editingGoal.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: editGoalForm.title.trim(),
+          type: editGoalForm.type,
+          targetValue,
+          currentValue,
+          unit: editGoalForm.unit,
+          targetDate: new Date(editGoalForm.targetDate).toISOString(),
+          status,
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        const wasCompleted = editingGoal.status === 'COMPLETED'
+        setGoals((prev:Goal[]) => prev.map((g:Goal) => g.id === editingGoal.id ? data.goal : g))
+        setEditingGoal(null)
+        showToast('✅ Mission updated!')
+        if (status === 'COMPLETED' && !wasCompleted) { triggerMissionCelebration(); triggerGoalCompleteNotif(editGoalForm.title.trim()) }
+      } else {
+        const err = await res.json()
+        setEditGoalError(err.error || 'Failed to update mission')
+      }
+    } catch {
+      setEditGoalError('Network error')
+    } finally {
+      setEditGoalSaving(false)
+    }
+  }
+
+  async function deleteGoal(goalId: string) {
+    const prev = goals
+    setGoals((g:Goal[]) => g.filter((x:Goal) => x.id !== goalId))
+    try {
+      const res = await fetch(`/api/goals/${goalId}`, { method: 'DELETE' })
+      if (res.ok) {
+        showToast('🗑 Mission deleted')
+      } else {
+        setGoals(prev)
+        showToast('⚠️ Could not delete mission')
+      }
+    } catch {
+      setGoals(prev)
+      showToast('⚠️ Network error')
+    }
   }
 
   // ── Sessions ──────────────────────────────────────────────────
@@ -917,22 +1112,39 @@ export default function DashboardPage() {
 
   const heatLvls = ['#ffffff09','#f59e0b28','#f59e0b55','#f59e0b88','#f59e0b']
   const heatData = (() => {
-    const levels = (analytics?.dailyData || []).map(d => {
-      if (d.studyMins <= 0) return 0
-      if (d.studyMins < 30) return 1
-      if (d.studyMins < 60) return 2
-      if (d.studyMins < 120) return 3
-      return 4
-    })
-    const padded = [...Array(Math.max(0, 28 - levels.length)).fill(0), ...levels]
     const today = new Date(); today.setHours(0,0,0,0)
-    return padded.map((level,i) => {
-      const date = new Date(today)
-      date.setDate(date.getDate() - (padded.length - 1 - i))
-      return { level, date }
+    const year = today.getFullYear()
+    const month = today.getMonth()
+    const firstOfMonth = new Date(year, month, 1)
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    // Build lookup: date string → studyMins from monthly API data
+    const minutesByDate = new Map<string, number>()
+    ;(analytics?.monthlyData || []).forEach((d: DailyData) => { minutesByDate.set(d.date, d.studyMins) })
+    // Cell for each day of the month
+    const monthCells = Array.from({ length: daysInMonth }, (_, i) => {
+      const date = new Date(year, month, i + 1)
+      const dateKey = `${year}-${String(month+1).padStart(2,'0')}-${String(i+1).padStart(2,'0')}`
+      const mins = date > today ? 0 : (minutesByDate.get(dateKey) || 0)
+      const level = mins <= 0 ? 0 : mins < 30 ? 1 : mins < 60 ? 2 : mins < 120 ? 3 : 4
+      return { level, date, faded: false }
     })
+    // Pad front so first day lands on the correct Sunday-aligned column
+    const firstDayOfWeek = firstOfMonth.getDay()
+    const prefix = Array.from({ length: firstDayOfWeek }, (_, i) => {
+      const date = new Date(year, month, i + 1 - firstDayOfWeek)
+      return { level: 0, date, faded: true }
+    })
+    // Pad end to complete the last row
+    const total = prefix.length + daysInMonth
+    const trailingCount = total % 7 === 0 ? 0 : 7 - (total % 7)
+    const suffix = Array.from({ length: trailingCount }, (_, i) => {
+      const date = new Date(year, month + 1, i + 1)
+      return { level: 0, date, faded: true }
+    })
+    return [...prefix, ...monthCells, ...suffix]
   })()
-  const heatDayLabels = heatData.slice(-7).map(d => d.date.toLocaleDateString('en-US',{weekday:'short'}))
+  const heatDayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+  const heatMonthLabel = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 
   // ── Settings ──────────────────────────────────────────────────
   async function saveSettings(patch: Partial<typeof userSettings>) {
@@ -950,6 +1162,7 @@ export default function DashboardPage() {
     }
 
     setUserSettings(updated)
+    setSoundEnabled(updated.soundEffects)
 
     try {
       localStorage.setItem('studySettings', JSON.stringify(updated))
@@ -969,6 +1182,7 @@ export default function DashboardPage() {
       if (saved) {
         const parsed = JSON.parse(saved)
         setUserSettings(s => ({ ...s, ...parsed }))
+        if (typeof parsed.soundEffects === 'boolean') setSoundEnabled(parsed.soundEffects)
         if (parsed.theme) document.documentElement.setAttribute('data-theme', parsed.theme)
         if (parsed.accentColor) {
           document.documentElement.style.setProperty('--amb', parsed.accentColor)
@@ -1078,8 +1292,8 @@ export default function DashboardPage() {
         /* Task items */
         .task-item{display:flex;align-items:center;gap:10px;padding:11px 13px;background:var(--sur2);border:1px solid var(--bdr);border-radius:11px;margin-bottom:7px;cursor:pointer;transition:all .15s;}
         .task-item:active{border-color:rgba(245,158,11,.25);}
-        .chk{width:18px;height:18px;border-radius:5px;border:2px solid var(--bdr2);flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;min-width:18px;}
-        .chk.done{background:var(--grn);border-color:var(--grn);color:#fff;font-size:10px;}
+        .chk{width:22px;height:22px;border-radius:6px;border:2px solid var(--bdr2);flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;min-width:22px;align-self:center;}
+        .chk.done{background:var(--grn);border-color:var(--grn);color:#fff;font-size:13px;}
         .ti-info{flex:1;min-width:0;}
         .ti-title{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
         .ti-meta{display:flex;align-items:center;gap:5px;margin-top:3px;flex-wrap:wrap;}
@@ -1093,8 +1307,12 @@ export default function DashboardPage() {
         /* Heatmap */
         .heatmap-days{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:4px;}
         .hm-lbl{font-size:9px;font-weight:700;color:var(--mut);text-align:center;font-family:'DM Mono',monospace;text-transform:uppercase;}
+        .heatmap-months{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:3px;}
+        .hm-mon{font-size:8px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;overflow:visible;font-family:'DM Sans',sans-serif;}
         .heatmap{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
-        .hm-c{aspect-ratio:1;border-radius:3px;cursor:default;}
+        .hm-c{aspect-ratio:1;border-radius:3px;cursor:default;position:relative;}
+        .hm-date{position:absolute;bottom:1px;right:2px;font-size:8px;line-height:1;pointer-events:none;color:rgba(255,255,255,.5);font-family:'DM Mono',monospace;}
+        :root[data-theme="light"] .hm-date{color:rgba(0,0,0,.4);}
         /* Toggle */
         .toggle{position:relative;width:40px;height:22px;flex-shrink:0;}
         .toggle input{opacity:0;width:0;height:0;}
@@ -1110,6 +1328,7 @@ export default function DashboardPage() {
         .goal-form.open{display:block;}
         .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}
         .f-label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin-bottom:5px;}
+        .spin-hide::-webkit-inner-spin-button,.spin-hide::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
         .f-input{width:100%;background:var(--sur);border:1px solid var(--bdr2);border-radius:9px;padding:10px 12px;color:var(--tx);font-family:inherit;font-size:14px;outline:none;}
         .f-input:focus{border-color:var(--amb);}
         .f-select{width:100%;background:var(--sur);border:1px solid var(--bdr2);border-radius:9px;padding:10px 12px;color:var(--tx);font-family:inherit;font-size:14px;outline:none;cursor:pointer;}
@@ -1163,6 +1382,11 @@ export default function DashboardPage() {
         /* Toast */
         #toast{position:fixed;bottom:calc(68px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%) translateY(80px);background:var(--sur2);border:1px solid var(--bdr2);border-radius:12px;padding:11px 18px;font-size:13px;font-weight:600;box-shadow:0 8px 32px rgba(0,0,0,.5);opacity:0;transition:all .3s cubic-bezier(.16,1,.3,1);z-index:9999;white-space:nowrap;max-width:calc(100vw - 32px);}
         #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+        @keyframes popIn{from{opacity:0;transform:scale(.88)}to{opacity:1;transform:scale(1)}}
+        .completion-popup{position:fixed;inset:0;z-index:9996;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);animation:fadeIn .25s ease;cursor:pointer;}
+        .completion-popup img{display:block;max-width:min(380px,80vw);max-height:min(380px,62vh);border-radius:18px;opacity:.7;box-shadow:0 24px 80px rgba(0,0,0,.7);animation:popIn .3s cubic-bezier(.16,1,.3,1);}
+        .completion-popup-label{color:#fff;font-weight:800;font-size:22px;margin-top:18px;text-shadow:0 2px 12px rgba(0,0,0,.9);letter-spacing:-.02em;pointer-events:none;}
+        .completion-popup-hint{color:rgba(255,255,255,.5);font-size:11px;margin-top:6px;pointer-events:none;}
         /* ── Interactive polish: hover/active states across all tabs ── */
         button{transition:transform .15s cubic-bezier(.34,1.56,.64,1),filter .15s ease;}
         button:hover{filter:brightness(1.08);}
@@ -1283,11 +1507,11 @@ export default function DashboardPage() {
                   ))}
                 </div>
                 <div className="g2">
-                  <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
-                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><div style={{fontSize:13,fontWeight:700}}>🤖 AI-Prioritized Tasks</div><button className="btn btn-ai" style={{padding:'5px 10px',fontSize:11}} onClick={()=>showToast('🤖 AI re-ranking tasks...')}>✨ Re-rank</button></div>
-                    <div style={{flex:1}}>
+                  <div style={{display:'flex',flexDirection:'column',gap:12}}>
+                    <div>
+                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><div style={{fontSize:13,fontWeight:700}}>🤖 AI-Prioritized Tasks</div><button className="btn btn-ai" style={{padding:'5px 10px',fontSize:11}} onClick={()=>showToast('🤖 AI re-ranking tasks...')}>✨ Re-rank</button></div>
                       {(() => {
-                        const pending = [...tasks].filter(t=>t.status==='TODO'||t.status==='IN_PROGRESS').sort((a,b)=>(b.aiPriority||0)-(a.aiPriority||0)).slice(0,3)
+                        const pending = [...tasks].filter(t=>t.status==='TODO'||t.status==='IN_PROGRESS').sort((a,b)=>(b.aiPriority||0)-(a.aiPriority||0)).slice(0,5)
                         if (pending.length === 0) return <div style={{fontSize:12,color:'var(--mut)',textAlign:'center',padding:'20px 0'}}>No tasks yet</div>
                         return pending.map(t=>{
                           const due = formatDue(t.dueDate)
@@ -1300,8 +1524,28 @@ export default function DashboardPage() {
                           )
                         })
                       })()}
+                      <button className="btn btn-ghost" style={{width:'100%',marginTop:8}} onClick={()=>navTo('tasks')}>View all tasks →</button>
                     </div>
-                    <button className="btn btn-ghost" style={{width:'100%',marginTop:8}} onClick={()=>navTo('tasks')}>View all tasks →</button>
+                    <div style={{background:'var(--sur2)',border:'1px solid var(--bdr)',borderRadius:'var(--r)',padding:14}}>
+                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+                        <div style={{fontSize:13,fontWeight:700}}>🎯 Missions</div>
+                        <button className="btn btn-ghost" style={{padding:'4px 10px',fontSize:11}} onClick={()=>navTo('goals')}>All →</button>
+                      </div>
+                      {goals.filter(g=>g.status!=='COMPLETED').length === 0 ? (
+                        <div style={{fontSize:12,color:'var(--mut)',textAlign:'center',padding:'10px 0'}}>No active missions yet</div>
+                      ) : goals.filter(g=>g.status!=='COMPLETED').slice(0,3).map(g=>{
+                        const pct = Math.min(100, Math.round((g.currentValue / g.targetValue) * 100))
+                        return (
+                          <div key={g.id} style={{marginBottom:8}}>
+                            <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}>
+                              <span style={{fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1,marginRight:8}}>{g.title}</span>
+                              <span style={{fontFamily:"'DM Mono',monospace",color:pct>=100?'var(--grn)':'var(--amb)',flexShrink:0}}>{pct}%</span>
+                            </div>
+                            <div className="pt"><div className="pf" style={{width:`${pct}%`,background:pct>=100?'var(--grn)':'linear-gradient(90deg,#6366f1,#f59e0b)'}}/></div>
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
                   <div style={{display:'flex',flexDirection:'column',gap:12}}>
                     <div className="card"><div className="card-t">📈 Study Hours – This Week</div><div className="bar-chart">{(() => {
@@ -1314,8 +1558,8 @@ export default function DashboardPage() {
                       })
                     })()}</div></div>
                     <div className="card">
-                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}><div className="card-t" style={{margin:0}}>🎯 Goals</div><button className="btn btn-ghost" style={{padding:'4px 10px',fontSize:11}} onClick={()=>navTo('goals')}>All</button></div>
-                      {goals.length===0 && <div style={{fontSize:12,color:'var(--mut)',textAlign:'center',padding:'12px 0'}}>No active goals yet</div>}
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}><div className="card-t" style={{margin:0}}>🎯 Missions</div><button className="btn btn-ghost" style={{padding:'4px 10px',fontSize:11}} onClick={()=>navTo('goals')}>All</button></div>
+                      {goals.length===0 && <div style={{fontSize:12,color:'var(--mut)',textAlign:'center',padding:'12px 0'}}>No active missions yet</div>}
                       {goals.slice(0,3).map(g=>{
                         const pct = Math.min(100, Math.round((g.currentValue / g.targetValue) * 100))
                         return (
@@ -1323,7 +1567,7 @@ export default function DashboardPage() {
                         )
                       })}
                     </div>
-                    <div className="card"><div className="card-t">🔥 Activity</div><div className="heatmap-days">{heatDayLabels.map((d,i)=><div key={i} className="hm-lbl">{d}</div>)}</div><div className="heatmap">{heatData.map((d,i)=><div key={i} className="hm-c" style={{background:heatLvls[d.level]}} title={d.date.toLocaleDateString('en-US',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}/>)}</div></div>
+                    <div className="card"><div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}><div className="card-t" style={{margin:0}}>🔥 Activity</div><div style={{fontSize:11,fontWeight:600,color:'var(--mut)',fontFamily:"'DM Mono',monospace"}}>{heatMonthLabel}</div></div><div className="heatmap-days">{heatDayLabels.map((d,i)=><div key={i} className="hm-lbl">{d}</div>)}</div><div className="heatmap">{heatData.map((d,i)=><div key={i} className="hm-c" style={{background:d.faded?'transparent':heatLvls[d.level]}} title={d.faded?'':d.date.toLocaleDateString('en-US',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}>{!d.faded&&<span className="hm-date">{d.date.getDate()}</span>}</div>)}</div></div>
                   </div>
                 </div>
               </div>
@@ -1410,22 +1654,48 @@ export default function DashboardPage() {
                         {col.items.length === 0 && <div style={{fontSize:12,color:'var(--mut)',textAlign:'center',padding:'20px 0'}}>Empty</div>}
                         {col.items.map(t=>{
                           const due = formatDue(t.dueDate)
+                          const isExpanded = expandedTaskId === t.id
                           return (
-                            <div key={t.id} className="task-item" style={{background:'var(--bg)',alignItems:'flex-start',...(t.status==='COMPLETED'?{opacity:.55}:{})}} onClick={()=>openEditTask(t)}>
-                              <div className={`chk${t.status==='COMPLETED'?' done':''}`} style={{marginTop:1}} onClick={e=>{e.stopPropagation();toggleTask(t)}}>{t.status==='COMPLETED'?'✓':''}</div>
-                              <div style={{flex:1,minWidth:0}}>
-                                <div style={{fontSize:13,fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.title}</div>
-                                {t.description && <div style={{fontSize:11,color:'var(--tx2)',marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.description}</div>}
-                                <div style={{display:'flex',gap:4,marginTop:3,flexWrap:'wrap',alignItems:'center'}}>
-                                  {t.subject && <span style={{fontSize:11,background:'var(--sur2)',border:'1px solid var(--bdr)',borderRadius:4,padding:'1px 6px'}}>{t.subject}</span>}
-                                  <span style={{fontSize:11,fontWeight:700,color:priorityColor(t.priority)}}>{t.priority}</span>
-                                  {due && <span style={{fontSize:11,color:due.urgent?'var(--red)':'var(--mut)'}}>📅 {due.date} · {due.label}</span>}
-                                  {t.estimatedMins ? <span style={{fontSize:11,color:'var(--mut)'}}>⏱ {formatMins(t.estimatedMins)}</span> : null}
-                                  {t.subtasks.length > 0 && <span style={{fontSize:11,color:'var(--mut)'}}>☑ {t.subtasks.filter(s=>s.completed).length}/{t.subtasks.length}</span>}
-                                  {t.tags.map(tag=><span key={tag} className="badge" style={{background:'var(--ov2)',color:'var(--tx2)'}}>#{tag}</span>)}
+                            <div key={t.id} style={{marginBottom:7}}>
+                              <div className="task-item" style={{background:'var(--bg)',marginBottom:0,...(t.status==='COMPLETED'?{opacity:.55}:{}),...(isExpanded?{borderRadius:'11px 11px 0 0',borderBottomColor:'transparent'}:{})}} onClick={()=>setExpandedTaskId(isExpanded ? null : t.id)}>
+                                <div className={`chk${t.status==='COMPLETED'?' done':''}`} onClick={e=>{e.stopPropagation();toggleTask(t)}}>{t.status==='COMPLETED'?'✓':''}</div>
+                                <div style={{flex:1,minWidth:0}}>
+                                  <div style={{fontSize:13,fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.title}</div>
+                                  {t.tags.length > 0 && (
+                                    <div style={{display:'flex',gap:4,marginTop:3,flexWrap:'wrap'}}>
+                                      {t.tags.map(tag=><span key={tag} className="badge" style={{background:'var(--ov2)',color:'var(--tx2)'}}>#{tag}</span>)}
+                                    </div>
+                                  )}
+                                  <div style={{display:'flex',gap:6,marginTop:3,flexWrap:'wrap',alignItems:'center'}}>
+                                    <span style={{fontSize:11,fontWeight:700,color:priorityColor(t.priority),fontFamily:"'DM Mono',monospace",minWidth:44,display:'inline-block'}}>{t.priority}</span>
+                                    {t.subject && <span style={{fontSize:11,background:'var(--sur2)',border:'1px solid var(--bdr)',borderRadius:4,padding:'1px 6px'}}>{t.subject}</span>}
+                                    {due && <span style={{fontSize:11,color:due.urgent?'var(--red)':'var(--mut)'}}>📅 {due.date} · {due.label}</span>}
+                                    {t.estimatedMins ? <span style={{fontSize:11,color:'var(--mut)'}}>⏱ {formatMins(t.estimatedMins)}</span> : null}
+                                    {t.subtasks.length > 0 && <span style={{fontSize:11,color:'var(--mut)'}}>☑ {t.subtasks.filter(s=>s.completed).length}/{t.subtasks.length}</span>}
+                                  </div>
+                                </div>
+                                <div style={{display:'flex',gap:10,alignItems:'center',flexShrink:0}}>
+                                  <button onClick={e=>{e.stopPropagation();openEditTask(t)}} style={{background:'var(--ov1)',border:'1px solid var(--bdr2)',borderRadius:8,color:'var(--tx2)',cursor:'pointer',fontSize:13,padding:'6px 10px',lineHeight:1}} title="Edit">✏️</button>
+                                  <button onClick={e=>{e.stopPropagation();setDeleteConfirm({id:t.id, title:t.title})}} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'4px 6px',opacity:.5}} title="Delete">✕</button>
                                 </div>
                               </div>
-                              <button onClick={e=>{e.stopPropagation();setDeleteConfirm({id:t.id, title:t.title})}} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'2px 4px',opacity:.5}} title="Delete">✕</button>
+                              {isExpanded && (
+                                <div style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderTop:'none',borderRadius:'0 0 11px 11px',padding:'12px 13px 12px 45px'}}>
+                                  {t.description && <div style={{fontSize:12,color:'var(--tx2)',marginBottom:t.subtasks.length>0?10:0,lineHeight:1.6}}>{t.description}</div>}
+                                  {t.subtasks.length > 0 ? (
+                                    <div>
+                                      {t.subtasks.map(s=>(
+                                        <div key={s.id} style={{display:'flex',alignItems:'center',gap:9,marginBottom:7}}>
+                                          <div className={`chk${s.completed?' done':''}`} onClick={()=>toggleSubtask(t.id, s)}>{s.completed?'✓':''}</div>
+                                          <span style={{fontSize:12,...(s.completed?{textDecoration:'line-through',color:'var(--mut)'}:{color:'var(--tx2)'})}}>{s.title}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : !t.description ? (
+                                    <div style={{fontSize:12,color:'var(--mut)'}}>No description or subtasks</div>
+                                  ) : null}
+                                </div>
+                              )}
                             </div>
                           )
                         })}
@@ -1609,7 +1879,7 @@ export default function DashboardPage() {
                   <div style={{display:'flex',gap:8}}><button className="btn btn-ai" style={{fontSize:12}} onClick={()=>showToast('🤖 Generating schedule...')}>🤖 AI Plan</button><button className="btn btn-amb" style={{fontSize:12}} onClick={()=>openDay(calendarDate)}>+ Event</button></div>
                 </div>
                 <div className="nf-bar">
-                  {(['month','week','year'] as const).map(v=><button key={v} className={`nf${calendarView===v?' active':''}`} onClick={()=>setCalendarView(v)}>{v==='month'?'Month':v==='week'?'Week':'Year'}</button>)}
+                  {(['week','month','year'] as const).map(v=><button key={v} className={`nf${calendarView===v?' active':''}`} onClick={()=>setCalendarView(v)}>{v==='month'?'Month':v==='week'?'Week':'Year'}</button>)}
                 </div>
 
                 {calendarView==='month' && (
@@ -1721,34 +1991,89 @@ export default function DashboardPage() {
                     <div style={{fontSize:32}}>🗓️</div>
                     <div style={{fontSize:13}}>Nothing scheduled for this day yet</div>
                   </div>
-                ) : dayTasks.map(t=>(
-                  <div key={t.id} className="task-item" style={t.status==='COMPLETED'?{opacity:.55}:{}}>
-                    <div className={`chk${t.status==='COMPLETED'?' done':''}`} onClick={()=>toggleTask(t)}>{t.status==='COMPLETED'?'✓':''}</div>
-                    <div className="ti-info">
-                      <div className="ti-title">{t.title}</div>
-                      <div className="ti-meta">
-                        {t.subject && <span className="badge b-cs">{t.subject}</span>}
-                        <span className="badge" style={{background:'var(--ov2)',color:priorityColor(t.priority)}}>{t.priority}</span>
+                ) : dayTasks.map(t=>{
+                  const due = formatDue(t.dueDate)
+                  const isExpanded = expandedTaskId === t.id
+                  return (
+                    <div key={t.id} style={{marginBottom:7}}>
+                      <div className="task-item" style={{background:'var(--bg)',marginBottom:0,...(t.status==='COMPLETED'?{opacity:.55}:{}),...(isExpanded?{borderRadius:'11px 11px 0 0',borderBottomColor:'transparent'}:{})}} onClick={()=>setExpandedTaskId(isExpanded ? null : t.id)}>
+                        <div className={`chk${t.status==='COMPLETED'?' done':''}`} onClick={e=>{e.stopPropagation();toggleTask(t)}}>{t.status==='COMPLETED'?'✓':''}</div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.title}</div>
+                          {t.tags.length > 0 && (
+                            <div style={{display:'flex',gap:4,marginTop:3,flexWrap:'wrap'}}>
+                              {t.tags.map(tag=><span key={tag} className="badge" style={{background:'var(--ov2)',color:'var(--tx2)'}}>#{tag}</span>)}
+                            </div>
+                          )}
+                          <div style={{display:'flex',gap:6,marginTop:3,flexWrap:'wrap',alignItems:'center'}}>
+                            <span style={{fontSize:11,fontWeight:700,color:priorityColor(t.priority),fontFamily:"'DM Mono',monospace",minWidth:44,display:'inline-block'}}>{t.priority}</span>
+                            {t.subject && <span style={{fontSize:11,background:'var(--sur2)',border:'1px solid var(--bdr)',borderRadius:4,padding:'1px 6px'}}>{t.subject}</span>}
+                            {due && <span style={{fontSize:11,color:due.urgent?'var(--red)':'var(--mut)'}}>📅 {due.date} · {due.label}</span>}
+                            {t.estimatedMins ? <span style={{fontSize:11,color:'var(--mut)'}}>⏱ {formatMins(t.estimatedMins)}</span> : null}
+                            {t.subtasks.length > 0 && <span style={{fontSize:11,color:'var(--mut)'}}>☑ {t.subtasks.filter(s=>s.completed).length}/{t.subtasks.length}</span>}
+                          </div>
+                        </div>
+                        <div style={{display:'flex',gap:10,alignItems:'center',flexShrink:0}}>
+                          <button onClick={e=>{e.stopPropagation();openEditTask(t)}} style={{background:'var(--ov1)',border:'1px solid var(--bdr2)',borderRadius:8,color:'var(--tx2)',cursor:'pointer',fontSize:13,padding:'6px 10px',lineHeight:1}} title="Edit">✏️</button>
+                          <button onClick={e=>{e.stopPropagation();setDeleteConfirm({id:t.id, title:t.title})}} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'4px 6px',opacity:.5}} title="Delete">✕</button>
+                        </div>
                       </div>
+                      {isExpanded && (
+                        <div style={{background:'var(--bg)',border:'1px solid var(--bdr)',borderTop:'none',borderRadius:'0 0 11px 11px',padding:'12px 13px 12px 45px'}}>
+                          {t.description && <div style={{fontSize:12,color:'var(--tx2)',marginBottom:t.subtasks.length>0?10:0,lineHeight:1.6}}>{t.description}</div>}
+                          {t.subtasks.length > 0 ? (
+                            <div>
+                              {t.subtasks.map(s=>(
+                                <div key={s.id} style={{display:'flex',alignItems:'center',gap:9,marginBottom:7}}>
+                                  <div className={`chk${s.completed?' done':''}`} onClick={()=>toggleSubtask(t.id, s)}>{s.completed?'✓':''}</div>
+                                  <span style={{fontSize:12,...(s.completed?{textDecoration:'line-through',color:'var(--mut)'}:{color:'var(--tx2)'})}}>{s.title}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : !t.description ? (
+                            <div style={{fontSize:12,color:'var(--mut)'}}>No description or subtasks</div>
+                          ) : null}
+                        </div>
+                      )}
                     </div>
-                    <button onClick={()=>setDeleteConfirm({id:t.id, title:t.title})} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'2px 4px',opacity:.5}} title="Delete">✕</button>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
 
-              {/* ── GOALS ── */}
+              {/* ── MISSIONS ── */}
               <div className={`dp${page==='goals'?' active':''}`}>
                 <div style={{display:'flex',justifyContent:'flex-end',marginBottom:14}}>
-                  <button className="btn btn-amb" onClick={()=>setGoalFormOpen(!goalFormOpen)}>+ New Goal</button>
+                  <button className="btn btn-amb" onClick={()=>setGoalFormOpen(!goalFormOpen)}>+ New Mission</button>
                 </div>
                 <div className={`goal-form${goalFormOpen?' open':''}`}>
-                  <div style={{fontSize:15,fontWeight:700,marginBottom:14}}>Create New Goal</div>
+                  <div style={{fontSize:15,fontWeight:700,marginBottom:14}}>Create New Mission</div>
                   {goalError && <div style={{background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#fca5a5',marginBottom:12}}>{goalError}</div>}
                   <div className="form-grid">
-                    <div><label className="f-label">Goal Title</label><input className="f-input" placeholder="e.g. Study 20 hours" value={newGoal.title} onChange={e=>setNewGoal(v=>({...v,title:e.target.value}))}/></div>
+                    <div><label className="f-label">Mission Title</label><input className="f-input" placeholder="e.g. Study 20 hours" value={newGoal.title} onChange={e=>setNewGoal(v=>({...v,title:e.target.value}))}/></div>
                     <div><label className="f-label">Type</label><select className="f-select" value={newGoal.type} onChange={e=>setNewGoal(v=>({...v,type:e.target.value}))}><option value="WEEKLY">Weekly</option><option value="DAILY">Daily</option><option value="MONTHLY">Monthly</option><option value="SEMESTER">Semester</option></select></div>
                     <div><label className="f-label">Target</label><input className="f-input" type="number" placeholder="20" value={newGoal.targetValue} onChange={e=>setNewGoal(v=>({...v,targetValue:e.target.value}))}/></div>
-                    <div><label className="f-label">Unit</label><select className="f-select" value={newGoal.unit} onChange={e=>setNewGoal(v=>({...v,unit:e.target.value}))}><option value="hours">hours</option><option value="tasks">tasks</option><option value="days">days</option></select></div>
+                    <div><label className="f-label">Unit</label>
+                      {(()=>{
+                        const presets = ['hours','tasks','days']
+                        const isCustom = !presets.includes(newGoal.unit)
+                        return (
+                          <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                            <select className="f-select"
+                              value={isCustom ? '__custom__' : newGoal.unit}
+                              onChange={e=>setNewGoal(v=>({...v,unit:e.target.value==='__custom__' ? '' : e.target.value}))}>
+                              <option value="hours">hours</option>
+                              <option value="tasks">tasks</option>
+                              <option value="days">days</option>
+                              <option value="__custom__">Custom…</option>
+                            </select>
+                            {isCustom && (
+                              <input className="f-input" autoFocus placeholder="e.g. coins" value={newGoal.unit}
+                                onChange={e=>setNewGoal(v=>({...v,unit:e.target.value}))}/>
+                            )}
+                          </div>
+                        )
+                      })()}
+                    </div>
                   </div>
                   <label className="f-label">Target Date</label>
                   <input className="f-input" type="date" style={{marginBottom:12}} value={newGoal.targetDate} onChange={e=>setNewGoal(v=>({...v,targetDate:e.target.value}))}/>
@@ -1758,20 +2083,23 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* Active Goals */}
-                <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--mut)',marginBottom:10}}>Active Goals</div>
-                {goals.filter(g=>g.status!=='COMPLETED').length === 0 ? (
+                {/* Active Missions */}
+                <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--mut)',marginBottom:10}}>Active Missions</div>
+                {goals.filter(g=>g.status==='ACTIVE').length === 0 ? (
                   <div style={{textAlign:'center',padding:'40px 0',color:'var(--tx2)'}}>
                     <div style={{fontSize:32,marginBottom:8}}>🎯</div>
-                    <div style={{fontSize:13}}>No active goals. Create one to start tracking!</div>
+                    <div style={{fontSize:13}}>No active missions. Create one to start tracking!</div>
                   </div>
-                ) : goals.filter(g=>g.status!=='COMPLETED').map(g=>{
+                ) : goals.filter(g=>g.status==='ACTIVE').map(g=>{
                   const pct = Math.min(100, Math.round((g.currentValue / g.targetValue) * 100))
                   return (
-                    <div key={g.id} className="goal-card">
-                      <div style={{display:'flex',justifyContent:'space-between',marginBottom:10}}>
+                    <div key={g.id} className="goal-card" onClick={()=>openEditGoal(g)}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10,marginBottom:10}}>
                         <div><div style={{fontSize:14,fontWeight:700}}>🎯 {g.title}</div><div style={{fontSize:11,color:'var(--mut)'}}>{g.type.charAt(0)+g.type.slice(1).toLowerCase()} · Due {new Date(g.targetDate).toLocaleDateString()}</div></div>
-                        <div style={{fontSize:20,fontWeight:900,fontFamily:"'DM Mono',monospace",color:'var(--amb)'}}>{pct}%</div>
+                        <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
+                          <div style={{fontSize:20,fontWeight:900,fontFamily:"'DM Mono',monospace",color:'var(--amb)'}}>{pct}%</div>
+                          <button onClick={e=>{e.stopPropagation();setGoalDeleteConfirm({id:g.id, title:g.title})}} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'4px 6px',opacity:.5}} title="Delete">✕</button>
+                        </div>
                       </div>
                       <div style={{display:'flex',alignItems:'center',gap:10}}>
                         <div style={{flex:1,height:7,background:'var(--ov2)',borderRadius:100,overflow:'hidden'}}><div style={{height:'100%',width:`${pct}%`,background:'linear-gradient(90deg,#6366f1,#f59e0b)',borderRadius:100}}/></div>
@@ -1781,24 +2109,53 @@ export default function DashboardPage() {
                   )
                 })}
 
-                {/* Completed Goals */}
+                {/* Completed Missions */}
                 {goals.filter(g=>g.status==='COMPLETED').length > 0 && (<>
-                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--mut)',margin:'20px 0 10px'}}>Completed Goals</div>
-                  {goals.filter(g=>g.status==='COMPLETED').map(g=>{
-                    return (
-                      <div key={g.id} className="goal-card" style={{opacity:.7,border:'1px solid rgba(16,185,129,.2)'}}>
-                        <div style={{display:'flex',justifyContent:'space-between',marginBottom:10}}>
-                          <div>
-                            <div style={{fontSize:14,fontWeight:700}}>🏆 {g.title}</div>
-                            <div style={{fontSize:11,color:'var(--mut)'}}>{g.type.charAt(0)+g.type.slice(1).toLowerCase()} · Completed</div>
-                          </div>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--mut)',margin:'20px 0 10px'}}>Completed Missions</div>
+                  {goals.filter(g=>g.status==='COMPLETED').map(g=>(
+                    <div key={g.id} className="goal-card" style={{opacity:.7,border:'1px solid rgba(16,185,129,.2)'}} onClick={()=>openEditGoal(g)}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10,marginBottom:10}}>
+                        <div>
+                          <div style={{fontSize:14,fontWeight:700}}>🏆 {g.title}</div>
+                          <div style={{fontSize:11,color:'var(--mut)'}}>{g.type.charAt(0)+g.type.slice(1).toLowerCase()} · Completed</div>
+                        </div>
+                        <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
                           <div style={{fontSize:20,fontWeight:900,fontFamily:"'DM Mono',monospace",color:'var(--grn)'}}>100%</div>
+                          <button onClick={e=>{e.stopPropagation();setGoalDeleteConfirm({id:g.id, title:g.title})}} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'4px 6px',opacity:.5}} title="Delete">✕</button>
+                        </div>
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:10}}>
+                        <div style={{flex:1,height:7,background:'var(--ov2)',borderRadius:100,overflow:'hidden'}}>
+                          <div style={{height:'100%',width:'100%',background:'var(--grn)',borderRadius:100}}/>
+                        </div>
+                        <div style={{fontSize:11,color:'var(--grn)',fontFamily:"'DM Mono',monospace",whiteSpace:'nowrap'}}>✓ Done</div>
+                      </div>
+                    </div>
+                  ))}
+                </>)}
+
+                {/* Removed Missions */}
+                {goals.filter(g=>g.status==='CANCELLED').length > 0 && (<>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--mut)',margin:'20px 0 10px'}}>Removed Missions</div>
+                  {goals.filter(g=>g.status==='CANCELLED').map(g=>{
+                    const pct = Math.min(100, Math.round((g.currentValue / g.targetValue) * 100))
+                    return (
+                      <div key={g.id} className="goal-card" style={{opacity:.45,border:'1px solid rgba(239,68,68,.15)'}} onClick={()=>openEditGoal(g)}>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10,marginBottom:10}}>
+                          <div>
+                            <div style={{fontSize:14,fontWeight:700,textDecoration:'line-through',color:'var(--mut)'}}>🚫 {g.title}</div>
+                            <div style={{fontSize:11,color:'var(--mut)'}}>{g.type.charAt(0)+g.type.slice(1).toLowerCase()} · Cancelled</div>
+                          </div>
+                          <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
+                            <div style={{fontSize:20,fontWeight:900,fontFamily:"'DM Mono',monospace",color:'var(--mut)'}}>{pct}%</div>
+                            <button onClick={e=>{e.stopPropagation();setGoalDeleteConfirm({id:g.id, title:g.title})}} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'4px 6px',opacity:.5}} title="Delete">✕</button>
+                          </div>
                         </div>
                         <div style={{display:'flex',alignItems:'center',gap:10}}>
                           <div style={{flex:1,height:7,background:'var(--ov2)',borderRadius:100,overflow:'hidden'}}>
-                            <div style={{height:'100%',width:'100%',background:'var(--grn)',borderRadius:100}}/>
+                            <div style={{height:'100%',width:`${pct}%`,background:'var(--mut)',borderRadius:100}}/>
                           </div>
-                          <div style={{fontSize:11,color:'var(--grn)',fontFamily:"'DM Mono',monospace",whiteSpace:'nowrap'}}>✓ Done</div>
+                          <div style={{fontSize:11,color:'var(--mut)',fontFamily:"'DM Mono',monospace",whiteSpace:'nowrap'}}>{g.currentValue}/{g.targetValue}{g.unit==='hours'?'h':''}</div>
                         </div>
                       </div>
                     )
@@ -1869,7 +2226,7 @@ export default function DashboardPage() {
               <div className={`dp${page==='settings'?' active':''}`}>
                 <div className="settings-layout">
                   <div className="settings-nav">
-                    {[{id:'profile',ic:'👤',l:'Profile'},{id:'prefs',ic:'🎨',l:'Prefs'},{id:'security',ic:'🔒',l:'Security'},{id:'danger',ic:'⚠️',l:'Danger'}].map(t=>(
+                    {[{id:'profile',ic:'👤',l:'Profile'},{id:'prefs',ic:'🎨',l:'Preferences'},{id:'security',ic:'🔒',l:'Security'},{id:'danger',ic:'⚠️',l:'Danger'}].map(t=>(
                       <button key={t.id} className={`sn-item${settingsTab===t.id?' active':''}`} style={t.id==='danger'?{color:'var(--red)'}:{}} onClick={()=>setSettingsTab(t.id)}>
                         <span>{t.ic}</span><span className="sn-lbl">{t.l}</span>
                       </button>
@@ -1939,9 +2296,16 @@ export default function DashboardPage() {
                             ))}
                           </div>
                         </div>
+                        <div className="sr">
+                          <div><div className="sr-lbl">Sound Effects</div><div className="sr-desc">Clicks, hovers & celebration sounds</div></div>
+                          <label className="toggle">
+                            <input type="checkbox" checked={userSettings.soundEffects} onChange={e=>saveSettings({soundEffects:e.target.checked})}/>
+                            <span className="tslider"/>
+                          </label>
+                        </div>
                       </div>
                     </div>}
-                    {settingsTab==='security'&&<div className="ss active"><div className="ss-title">Security</div><div className="ss-sub">Account security settings</div><div className="s-card"><div className="sr"><div><div className="sr-lbl">Password</div><div className="sr-desc">Changed 30 days ago</div></div><button className="btn btn-ghost" style={{fontSize:12,padding:'6px 12px'}}>Change</button></div></div></div>}
+                    {settingsTab==='security'&&<div className="ss active"><div className="ss-title">Security</div><div className="ss-sub">Account security settings</div><div className="s-card"><div className="sr"><div><div className="sr-lbl">Password</div><div className="sr-desc"></div></div><button className="btn btn-ghost" style={{fontSize:12,padding:'6px 12px'}}>Change</button></div></div></div>}
                     {settingsTab==='danger'&&<div className="ss active"><div className="ss-title" style={{color:'var(--red)'}}>Danger Zone</div><div className="ss-sub">Irreversible — proceed carefully</div><div className="danger-box"><div style={{fontSize:13,fontWeight:700,color:'var(--red)',marginBottom:12}}>⚠️ Irreversible Actions</div><div style={{display:'flex',flexDirection:'column',gap:10}}>{[{t:'Clear All Data',d:'Delete sessions, tasks & analytics'},{t:'Delete Account',d:'Permanently remove all data'}].map(a=><div key={a.t} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:12,background:'rgba(239,68,68,.05)',border:'1px solid rgba(239,68,68,.15)',borderRadius:10,gap:12}}><div><div style={{fontSize:13,fontWeight:600}}>{a.t}</div><div style={{fontSize:12,color:'var(--mut)'}}>{a.d}</div></div><button className="btn btn-red" style={{fontSize:12}} onClick={()=>a.t.includes('Account')?router.push('/'):showToast('⚠️ This cannot be undone!')}>Delete</button></div>)}</div></div></div>}
                   </div>
                 </div>
@@ -2005,7 +2369,25 @@ export default function DashboardPage() {
                 {editingTask.subtasks.map(s=>(
                   <div key={s.id} style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
                     <div className={`chk${s.completed?' done':''}`} onClick={()=>toggleSubtask(editingTask.id, s)}>{s.completed?'✓':''}</div>
-                    <div style={{flex:1,fontSize:13,...(s.completed?{textDecoration:'line-through',color:'var(--mut)'}:{})}}>{s.title}</div>
+                    {editingSubtaskId === s.id ? (
+                      <input
+                        autoFocus
+                        value={editingSubtaskTitle}
+                        onChange={e=>setEditingSubtaskTitle(e.target.value)}
+                        onBlur={()=>saveSubtaskTitle(editingTask.id, s.id, editingSubtaskTitle)}
+                        onKeyDown={e=>{
+                          if(e.key==='Enter') saveSubtaskTitle(editingTask.id, s.id, editingSubtaskTitle)
+                          if(e.key==='Escape'){setEditingSubtaskId(null);setEditingSubtaskTitle('')}
+                        }}
+                        style={{...taskInputStyle,flex:1,padding:'4px 8px',fontSize:13}}
+                      />
+                    ) : (
+                      <div
+                        style={{flex:1,fontSize:13,cursor:'text',borderRadius:6,padding:'3px 6px',...(s.completed?{textDecoration:'line-through',color:'var(--mut)'}:{})}}
+                        title="Click to edit"
+                        onClick={()=>{setEditingSubtaskId(s.id);setEditingSubtaskTitle(s.title)}}
+                      >{s.title}</div>
+                    )}
                     <button onClick={()=>deleteSubtask(editingTask.id, s.id)} style={{background:'none',border:'none',color:'var(--mut)',cursor:'pointer',fontSize:14,padding:'2px 4px',opacity:.5}} title="Remove">✕</button>
                   </div>
                 ))}
@@ -2039,6 +2421,164 @@ export default function DashboardPage() {
               <button className="btn btn-red" style={{flex:1}} onClick={()=>{deleteTask(deleteConfirm.id);setDeleteConfirm(null)}}>Delete</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {editingGoal && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:9998,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 20px',backdropFilter:'blur(4px)'}} onClick={()=>setEditingGoal(null)}>
+          <div style={{background:'var(--sur2)',border:'1px solid var(--bdr2)',borderRadius:16,padding:'24px 22px',maxWidth:460,width:'100%',maxHeight:'85vh',overflowY:'auto',boxShadow:'0 24px 64px rgba(0,0,0,.6)'}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:16,fontWeight:800,marginBottom:14}}>Edit Mission</div>
+            {editGoalError && <div style={{background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#fca5a5',marginBottom:10}}>{editGoalError}</div>}
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              <input placeholder="Mission title *" value={editGoalForm.title} onChange={e=>setEditGoalForm(v=>({...v,title:e.target.value}))}
+                style={taskInputStyle}/>
+              <div style={{display:'flex',gap:8}}>
+                <select value={editGoalForm.type} onChange={e=>setEditGoalForm(v=>({...v,type:e.target.value}))}
+                  style={{...taskInputStyle,flex:1}}>
+                  <option value="DAILY">Daily</option>
+                  <option value="WEEKLY">Weekly</option>
+                  <option value="MONTHLY">Monthly</option>
+                  <option value="SEMESTER">Semester</option>
+                </select>
+                {(()=>{
+                  const presets = ['hours','tasks','days']
+                  const isCustom = !presets.includes(editGoalForm.unit)
+                  return (
+                    <div style={{display:'flex',flexDirection:'column',gap:4,width:130}}>
+                      <select
+                        value={isCustom ? '__custom__' : editGoalForm.unit}
+                        onChange={e => setEditGoalForm(v=>({...v, unit: e.target.value === '__custom__' ? '' : e.target.value}))}
+                        style={{...taskInputStyle,width:'100%'}}>
+                        <option value="hours">hours</option>
+                        <option value="tasks">tasks</option>
+                        <option value="days">days</option>
+                        <option value="__custom__">Custom…</option>
+                      </select>
+                      {isCustom && (
+                        <input autoFocus placeholder="e.g. coins" value={editGoalForm.unit}
+                          onChange={e=>setEditGoalForm(v=>({...v,unit:e.target.value}))}
+                          style={{...taskInputStyle,width:'100%'}}/>
+                      )}
+                    </div>
+                  )
+                })()}
+              </div>
+              {(() => {
+                const gap = Math.max(0.01, Number(editGoalForm.gap) || 1)
+
+
+                const stopHold = () => {
+                  if (holdTimerRef.current) clearTimeout(holdTimerRef.current)
+                  if (holdIntervalRef.current) clearInterval(holdIntervalRef.current)
+                }
+                const startHold = (action: () => void) => {
+                  action()
+                  holdTimerRef.current = setTimeout(() => {
+                    holdIntervalRef.current = setInterval(action, 80)
+                  }, 420)
+                }
+
+                const triBtn = (color: string, action: () => void, dir: 'up'|'down') => (
+                  <button
+                    onMouseDown={() => startHold(action)}
+                    onMouseUp={stopHold}
+                    onMouseLeave={stopHold}
+                    onTouchStart={e => { e.preventDefault(); startHold(action) }}
+                    onTouchEnd={stopHold}
+                    style={{background:'none',border:'none',cursor:'pointer',padding:'4px 8px',display:'flex',alignItems:'center',justifyContent:'center',userSelect:'none'}}
+                  >
+                    <div style={{width:0,height:0,
+                      borderLeft:'14px solid transparent',borderRight:'14px solid transparent',
+                      ...(dir==='up'
+                        ? {borderBottom:`18px solid ${color}`}
+                        : {borderTop:`18px solid ${color}`})
+                    }}/>
+                  </button>
+                )
+
+                const incCur = () => setEditGoalForm(v => { const max = Number(v.targetValue||0); return {...v, currentValue: String(Math.min(max, Math.round((Number(v.currentValue||0) + gap) * 100) / 100))} })
+                const decCur = () => setEditGoalForm(v => ({...v, currentValue: String(Math.max(0, Math.round((Number(v.currentValue||0) - gap) * 100) / 100))}))
+                const incTgt = () => setEditGoalForm(v => ({...v, targetValue: String(Math.round((Number(v.targetValue||0) + gap) * 100) / 100)}))
+                const decTgt = () => setEditGoalForm(v => { const min = Math.max(gap, Math.round((Number(v.targetValue||0) - gap) * 100) / 100); const cur = Math.min(Number(v.currentValue||0), min); return {...v, targetValue: String(min), currentValue: String(cur)} })
+
+                return (
+                  <div>
+                    <div style={{display:'flex',gap:16,marginTop:4}}>
+                      {([
+                        {label:'Progress',color:'#22c55e',value:editGoalForm.currentValue,onInc:incCur,onDec:decCur,onChange:(val:string)=>setEditGoalForm(v=>({...v,currentValue:val}))},
+                        {label:'Target',color:'#ef4444',value:editGoalForm.targetValue,onInc:incTgt,onDec:decTgt,onChange:(val:string)=>setEditGoalForm(v=>({...v,targetValue:val}))},
+                      ] as const).map(({label,color,value,onInc,onDec,onChange})=>(
+                        <div key={label} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',background:'var(--bg)',border:'1px solid var(--bdr)',borderRadius:'var(--r)',padding:'14px 8px 10px'}}>
+                          <label className="f-label" style={{marginBottom:10,textAlign:'center'}}>{label}</label>
+                          {triBtn(color, onInc, 'up')}
+                          <input
+                            type="number" min={0}
+                            className="spin-hide"
+                            value={value}
+                            onChange={e=>onChange(e.target.value)}
+                            style={{fontSize:28,fontWeight:900,fontFamily:"'DM Mono',monospace",color,width:'100%',textAlign:'center',background:'transparent',border:'none',outline:'none',MozAppearance:'textfield',padding:'6px 0',lineHeight:1,display:'block'}}
+                          />
+                          {triBtn(color, onDec, 'down')}
+                          <div style={{fontSize:10,color:'var(--mut)',marginTop:8}}>{editGoalForm.unit}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{marginTop:10,display:'flex',alignItems:'center',gap:10}}>
+                      <label className="f-label" style={{whiteSpace:'nowrap',marginBottom:0}}>Increment by</label>
+                      <input type="number" min={0.01} step={0.01} value={editGoalForm.gap}
+                        onChange={e=>setEditGoalForm(v=>({...v,gap:e.target.value}))}
+                        style={{...taskInputStyle,width:90,textAlign:'center'}}/>
+                      <span style={{fontSize:12,color:'var(--mut)'}}>{editGoalForm.unit}</span>
+                    </div>
+                  </div>
+                )
+              })()}
+              <div style={{display:'flex',gap:8}}>
+                <div style={{flex:1}}>
+                  <label className="f-label" style={{marginBottom:4}}>Target Date</label>
+                  <input type="date" value={editGoalForm.targetDate} onChange={e=>setEditGoalForm(v=>({...v,targetDate:e.target.value}))}
+                    style={{...taskInputStyle,width:'100%'}}/>
+                </div>
+                <div style={{flex:1}}>
+                  <label className="f-label" style={{marginBottom:4}}>Status</label>
+                  <select value={editGoalForm.status} onChange={e=>setEditGoalForm(v=>({...v,status:e.target.value}))}
+                    style={{...taskInputStyle,width:'100%'}}>
+                    <option value="ACTIVE">Active</option>
+                    <option value="COMPLETED">Completed</option>
+                    <option value="CANCELLED">Cancelled</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:6}}>
+                <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>setEditingGoal(null)}>Cancel</button>
+                <button className="btn btn-amb" style={{fontSize:12}} onClick={saveEditGoal} disabled={editGoalSaving}>{editGoalSaving?'Saving...':'Save Changes'}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {goalDeleteConfirm && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:9998,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 20px',backdropFilter:'blur(4px)'}}>
+          <div style={{background:'var(--sur2)',border:'1px solid var(--bdr2)',borderRadius:16,padding:'24px 22px',maxWidth:340,width:'100%',boxShadow:'0 24px 64px rgba(0,0,0,.6)'}}>
+            <div style={{width:44,height:44,borderRadius:12,background:'rgba(239,68,68,.12)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,marginBottom:14}}>🗑</div>
+            <div style={{fontSize:16,fontWeight:800,marginBottom:6}}>Delete mission?</div>
+            <div style={{fontSize:13,color:'var(--tx2)',marginBottom:20,lineHeight:1.5}}>
+              "<span style={{color:'var(--tx)',fontWeight:600}}>{goalDeleteConfirm.title}</span>" will be permanently removed.
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <button className="btn btn-ghost" style={{flex:1}} onClick={()=>setGoalDeleteConfirm(null)}>Cancel</button>
+              <button className="btn btn-red" style={{flex:1}} onClick={()=>{deleteGoal(goalDeleteConfirm.id);setGoalDeleteConfirm(null)}}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {completionGif && (
+        <div className="completion-popup" onClick={() => setCompletionGif(null)}>
+          <img src={completionGif} alt="Celebration!" />
+          <div className="completion-popup-label">🎉 Well Done!</div>
+          <div className="completion-popup-hint">Tap anywhere to dismiss</div>
         </div>
       )}
 

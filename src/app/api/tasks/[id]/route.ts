@@ -24,7 +24,7 @@ export async function GET(
   return withAuth(req, async (req, user: JWTPayload) => {
     const task = await prisma.task.findFirst({
       where: { id: params.id, userId: user.sub },
-      include: { subtasks: true },
+      include: { subtasks: { orderBy: { createdAt: 'asc' } } },
     })
 
     if (!task) {
@@ -79,7 +79,7 @@ export async function PATCH(
         ...(data.estimatedMins !== undefined && { estimatedMins: data.estimatedMins }),
         ...(data.tags && { tags: data.tags }),
       },
-      include: { subtasks: true },
+      include: { subtasks: { orderBy: { createdAt: 'asc' } } },
     })
 
     return NextResponse.json({ task, message: 'Task updated successfully' })

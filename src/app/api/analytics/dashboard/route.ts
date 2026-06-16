@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { withAuth } from '@/middleware/apiMiddleware'
-import { subDays, startOfWeek, eachDayOfInterval, format } from 'date-fns'
+import { subDays, startOfWeek, eachDayOfInterval, format, startOfMonth } from 'date-fns'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,9 +12,12 @@ export async function GET(req: NextRequest) {
     const sevenDaysAgo = subDays(now, 7)
     const thirtyDaysAgo = subDays(now, 30)
 
+    const monthStart = startOfMonth(now)
+
     const [
       taskStats,
       recentSessions,
+      monthlySessions,
       weeklyGoals,
       subjectBreakdown,
     ] = await Promise.all([
@@ -28,6 +31,13 @@ export async function GET(req: NextRequest) {
       // Study sessions last 7 days
       prisma.studySession.findMany({
         where: { userId: user.sub, startTime: { gte: sevenDaysAgo } },
+        select: { startTime: true, durationMins: true, focusScore: true, subject: true },
+        orderBy: { startTime: 'asc' },
+      }),
+
+      // Study sessions current month (for heatmap)
+      prisma.studySession.findMany({
+        where: { userId: user.sub, startTime: { gte: monthStart } },
         select: { startTime: true, durationMins: true, focusScore: true, subject: true },
         orderBy: { startTime: 'asc' },
       }),
@@ -67,6 +77,24 @@ export async function GET(req: NextRequest) {
       }
     })
 
+    // Build monthly heatmap data (each day of current month up to today)
+    const monthDays = eachDayOfInterval({ start: monthStart, end: now })
+    const monthlyData = monthDays.map((day) => {
+      const dayStr = format(day, 'yyyy-MM-dd')
+      const daySessions = monthlySessions.filter(
+        (s) => format(s.startTime, 'yyyy-MM-dd') === dayStr
+      )
+      return {
+        date: dayStr,
+        label: format(day, 'd'),
+        studyMins: daySessions.reduce((sum, s) => sum + (s.durationMins || 0), 0),
+        sessionCount: daySessions.length,
+        avgFocus: daySessions.length
+          ? Math.round(daySessions.reduce((s, x) => s + (x.focusScore || 0), 0) / daySessions.length)
+          : 0,
+      }
+    })
+
     const taskMap = Object.fromEntries(taskStats.map((t) => [t.status, t._count.id]))
 
     return NextResponse.json({
@@ -88,6 +116,7 @@ export async function GET(req: NextRequest) {
           : 0,
       },
       dailyData,
+      monthlyData,
       goals: weeklyGoals,
       subjectBreakdown: subjectBreakdown.map((s) => ({
         subject: s.subject,
