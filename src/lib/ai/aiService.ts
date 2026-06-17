@@ -61,7 +61,11 @@ async function createTaskFromArgs(userId: string, rawArgs: string): Promise<{ an
 
   let dueDate: Date | null = null
   if (args.dueDate) {
-    const parsed = new Date(args.dueDate)
+    // The model returns a local datetime string with no timezone (e.g. "2026-02-26T23:59").
+    // Pin it to Asia/Jakarta (UTC+7) so it isn't misread as UTC and shifted a day.
+    const raw = args.dueDate.trim()
+    const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(raw)
+    const parsed = new Date(hasTz ? raw : `${raw}+07:00`)
     if (!isNaN(parsed.getTime())) dueDate = parsed
   }
 
@@ -204,7 +208,9 @@ export async function answerStudyQuestion(
   subject: string,
   history: ChatMessage[] = []
 ): Promise<StudyQAResult> {
-  const today = new Date().toISOString().slice(0, 10)
+  // Use the user's local date (Asia/Jakarta, UTC+7) so "tomorrow"/"today" are
+  // computed correctly. toISOString() would give UTC, which is up to a day behind.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' })
   const systemPrompt = `You are Kira, a friendly AI study companion for university students.
 Help students understand difficult concepts with clear, step-by-step explanations.
 Guidelines: be encouraging, use relevant examples, keep answers concise (200-400 words),
