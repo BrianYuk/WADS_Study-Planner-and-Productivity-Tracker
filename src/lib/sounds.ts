@@ -10,6 +10,8 @@ const SRC = {
   click:   '/sounds/mouse-click.m4a',
   mission: '/sounds/Mission-complete.mp3',
   chime:   '/sounds/happy-chime.mp3',
+  bell:    '/sounds/bell.m4a',
+  alarm:   '/sounds/alarm_sound.m4a',
 } as const
 
 // ── Enabled flag ──────────────────────────────────────────────────
@@ -158,4 +160,54 @@ export function playMissionCompleteSound(onFinished?: () => void) {
   setTimeout(finish, dur + 1500)
 
   playClip(SRC.mission, 1, 1, finish)
+}
+
+// A study session finishes and is successfully recorded → bell chime.
+export function playBellSound() {
+  playClip(SRC.bell, 1, 1)
+}
+
+// ── Alarm (timer ran out) ────────────────────────────────────────
+// Loops until stopAlarmSound() is called (the user dismisses the popup).
+let alarmSource: AudioBufferSourceNode | null = null
+let alarmAudioEl: HTMLAudioElement | null = null
+
+export function playAlarmSound() {
+  if (typeof window === 'undefined' || !isSoundEnabled()) return
+  stopAlarmSound()
+
+  const ctx = getCtx()
+  const buf = buffers[SRC.alarm]
+  if (ctx && buf) {
+    try {
+      const source = ctx.createBufferSource()
+      source.buffer = buf
+      source.loop = true
+      const gain = ctx.createGain()
+      gain.gain.value = 1
+      source.connect(gain).connect(ctx.destination)
+      source.start()
+      alarmSource = source
+      return
+    } catch {}
+  }
+  // Not decoded yet: warm the cache for next time and fall back to <audio> this once.
+  decode(SRC.alarm)
+  try {
+    const audio = new Audio(SRC.alarm)
+    audio.loop = true
+    void audio.play().catch(() => {})
+    alarmAudioEl = audio
+  } catch {}
+}
+
+export function stopAlarmSound() {
+  if (alarmSource) {
+    try { alarmSource.stop() } catch {}
+    alarmSource = null
+  }
+  if (alarmAudioEl) {
+    try { alarmAudioEl.pause(); alarmAudioEl.currentTime = 0 } catch {}
+    alarmAudioEl = null
+  }
 }

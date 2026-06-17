@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Logo from '@/components/Logo'
-import { playTaskCompleteSound, playMissionCompleteSound, setSoundEnabled } from '@/lib/sounds'
+import { playTaskCompleteSound, playMissionCompleteSound, setSoundEnabled, playBellSound, playAlarmSound, stopAlarmSound } from '@/lib/sounds'
 
 
 type Subtask = {
@@ -56,8 +56,8 @@ type StudySessionItem = {
 const sessionIcons: Record<string,string> = { POMODORO:'🍅', DEEP_WORK:'🧠', REVIEW:'📖', PRACTICE:'✏️', READING:'📚' }
 
 const accentPalettes: Record<'dark'|'light', string[]> = {
-  dark:  ['#f59e0b','#6366f1','#10b981','#ef4444','#8b5cf6'],
-  light: ['#d97706','#4f46e5','#059669','#dc2626','#7c3aed'],
+  dark:  ['#f59e0b','#6366f1','#10b981','#ef4444','#8b5cf6','#f47b1a'],
+  light: ['#d97706','#4f46e5','#059669','#dc2626','#7c3aed','#d35400'],
 }
 
 type Page = 'dashboard'|'tasks'|'kira'|'timer'|'calendar'|'calendarDay'|'goals'|'analytics'|'notifications'|'settings'
@@ -108,6 +108,7 @@ export default function DashboardPage() {
   const [timerRemain, setTimerRemain] = useState(1500)
   const [timerTotal, setTimerTotal] = useState(1500)
   const [timerMode, setTimerMode] = useState('Pomodoro')
+  const [alarmActive, setAlarmActive] = useState(false)
   const [customH, setCustomH] = useState(0)
   const [customM, setCustomM] = useState(25)
   const [customS, setCustomS] = useState(0)
@@ -131,9 +132,6 @@ export default function DashboardPage() {
     dailyGoalHours: '4',
     accentColor: '#f59e0b',
     theme: 'dark' as 'dark'|'light',
-    timerAutoStart: true,
-    timerSound: true,
-    timerLongBreak: false,
     soundEffects: true,
   })
   const timerRef = useRef<ReturnType<typeof setInterval>|null>(null)
@@ -279,6 +277,8 @@ export default function DashboardPage() {
           if (r <= 1) {
             clearInterval(timerRef.current!)
             setTimerRunning(false)
+            playAlarmSound()
+            setAlarmActive(true)
             // Auto-save session when timer completes (skip break mode)
             if (timerMode !== 'Break') saveSession(timerTotal)
             return 0
@@ -303,7 +303,21 @@ export default function DashboardPage() {
   }
   function resetTimer() { if(timerRef.current) clearInterval(timerRef.current); setTimerRunning(false); setTimerRemain(timerTotal) }
   function setMode(name: string, secs: number) { if(timerRef.current) clearInterval(timerRef.current); setTimerRunning(false); setTimerMode(name); setTimerTotal(secs); setTimerRemain(secs); setShowCustomSetup(false) }
-  useEffect(() => () => { if(timerRef.current) clearInterval(timerRef.current) }, [])
+  function dismissAlarm() { stopAlarmSound(); setAlarmActive(false) }
+  useEffect(() => () => { if(timerRef.current) clearInterval(timerRef.current); stopAlarmSound() }, [])
+
+  // Press-and-hold support for +/- spinners (custom timer, mission progress).
+  // Fires once immediately, then repeats every 80ms after a 420ms hold.
+  function stopHold() {
+    if (holdTimerRef.current) clearTimeout(holdTimerRef.current)
+    if (holdIntervalRef.current) clearInterval(holdIntervalRef.current)
+  }
+  function startHold(action: () => void) {
+    action()
+    holdTimerRef.current = setTimeout(() => {
+      holdIntervalRef.current = setInterval(action, 80)
+    }, 420)
+  }
 
   // ── Fetch tasks from real API ─────────────────────────────────
   const fetchTasks = useCallback(async () => {
@@ -886,6 +900,7 @@ export default function DashboardPage() {
         body: JSON.stringify(body),
       })
       if (res.ok) {
+        playBellSound()
         showToast('✅ Session saved!')
         fetchAnalytics()
         fetchTodaySessions()
@@ -995,9 +1010,13 @@ export default function DashboardPage() {
       if (res.ok) {
         const data = await res.json()
         setChatMessages([...newHistory, { role: 'assistant', content: data.answer }])
-        if (data.taskCreated) {
+        if (data.tasksCreated?.length) {
           fetchTasks()
-          showToast('✅ Task created!')
+          showToast(data.tasksCreated.length > 1 ? `✅ ${data.tasksCreated.length} tasks created!` : '✅ Task created!')
+        }
+        if (data.missionsCreated?.length) {
+          fetchGoals()
+          showToast(data.missionsCreated.length > 1 ? `🎯 ${data.missionsCreated.length} missions created!` : '🎯 Mission created!')
         }
       } else {
         setChatMessages([...newHistory, { role: 'assistant', content: 'Sorry, I had trouble answering. Please try again.' }])
@@ -1383,10 +1402,23 @@ export default function DashboardPage() {
         #toast{position:fixed;bottom:calc(68px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%) translateY(80px);background:var(--sur2);border:1px solid var(--bdr2);border-radius:12px;padding:11px 18px;font-size:13px;font-weight:600;box-shadow:0 8px 32px rgba(0,0,0,.5);opacity:0;transition:all .3s cubic-bezier(.16,1,.3,1);z-index:9999;white-space:nowrap;max-width:calc(100vw - 32px);}
         #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
         @keyframes popIn{from{opacity:0;transform:scale(.88)}to{opacity:1;transform:scale(1)}}
+        /* Mini timer (floating, visible on every tab while a session is active) */
+        .mini-timer{position:fixed;top:calc(var(--tb) + 14px);left:50%;transform:translateX(-50%);z-index:250;display:flex;align-items:center;gap:8px;background:var(--sur2);border:1px solid var(--bdr2);border-radius:100px;padding:6px 8px 6px 12px;box-shadow:0 8px 24px rgba(0,0,0,.35);cursor:pointer;user-select:none;animation:fadeIn .2s ease;}
+        .mini-timer-dot{width:7px;height:7px;border-radius:50%;background:var(--amb);flex-shrink:0;}
+        .mini-timer-dot.pulse{animation:miniPulse 1.4s ease-in-out infinite;}
+        @keyframes miniPulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+        .mini-timer-icon{font-size:13px;}
+        .mini-timer-time{font-family:'DM Mono',monospace;font-size:13px;font-weight:700;letter-spacing:.02em;}
+        .mini-timer-btn{width:24px;height:24px;border-radius:50%;border:none;background:var(--ov2);color:var(--tx);display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;flex-shrink:0;}
+        .mini-timer-btn:active{background:var(--ov3);}
         .completion-popup{position:fixed;inset:0;z-index:9996;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);animation:fadeIn .25s ease;cursor:pointer;}
         .completion-popup img{display:block;max-width:min(380px,80vw);max-height:min(380px,62vh);border-radius:18px;opacity:.7;box-shadow:0 24px 80px rgba(0,0,0,.7);animation:popIn .3s cubic-bezier(.16,1,.3,1);}
         .completion-popup-label{color:#fff;font-weight:800;font-size:22px;margin-top:18px;text-shadow:0 2px 12px rgba(0,0,0,.9);letter-spacing:-.02em;pointer-events:none;}
         .completion-popup-hint{color:rgba(255,255,255,.5);font-size:11px;margin-top:6px;pointer-events:none;}
+        /* Alarm popup (timer ran out of time) */
+        .alarm-popup{position:fixed;inset:0;z-index:9997;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);animation:fadeIn .25s ease;cursor:pointer;}
+        .alarm-popup-icon{font-size:72px;filter:drop-shadow(0 8px 24px rgba(245,158,11,.5));animation:alarmRing .5s ease-in-out infinite;pointer-events:none;}
+        @keyframes alarmRing{0%,100%{transform:rotate(0deg);}20%{transform:rotate(-18deg);}40%{transform:rotate(14deg);}60%{transform:rotate(-10deg);}80%{transform:rotate(6deg);}}
         /* ── Interactive polish: hover/active states across all tabs ── */
         button{transition:transform .15s cubic-bezier(.34,1.56,.64,1),filter .15s ease;}
         button:hover{filter:brightness(1.08);}
@@ -1805,9 +1837,17 @@ export default function DashboardPage() {
                               <span key={u.label} style={{display:'flex',alignItems:'center'}}>
                                 {i>0 && <span>:</span>}
                                 <span className="cu-unit">
-                                  <button className="cu-arrow up" onClick={()=>u.set((v:number)=>v>=u.max?0:v+1)}>▲</button>
+                                  <button className="cu-arrow up"
+                                    onMouseDown={()=>startHold(()=>u.set((v:number)=>v>=u.max?0:v+1))}
+                                    onMouseUp={stopHold} onMouseLeave={stopHold}
+                                    onTouchStart={e=>{e.preventDefault();startHold(()=>u.set((v:number)=>v>=u.max?0:v+1))}}
+                                    onTouchEnd={stopHold}>▲</button>
                                   {String(u.val).padStart(2,'0')}
-                                  <button className="cu-arrow down" onClick={()=>u.set((v:number)=>v<=0?u.max:v-1)}>▼</button>
+                                  <button className="cu-arrow down"
+                                    onMouseDown={()=>startHold(()=>u.set((v:number)=>v<=0?u.max:v-1))}
+                                    onMouseUp={stopHold} onMouseLeave={stopHold}
+                                    onTouchStart={e=>{e.preventDefault();startHold(()=>u.set((v:number)=>v<=0?u.max:v-1))}}
+                                    onTouchEnd={stopHold}>▼</button>
                                 </span>
                               </span>
                             ))}
@@ -1851,22 +1891,6 @@ export default function DashboardPage() {
                         ))}
                         <div style={{paddingTop:10,borderTop:'1px solid var(--bdr)',display:'flex',justifyContent:'space-between',fontSize:12}}><span style={{color:'var(--mut)'}}>Total today:</span><span style={{fontWeight:700,fontFamily:"'DM Mono',monospace",color:'var(--amb)'}}>{formatMinsLabel(todayTotalMins)}</span></div>
                       </>)}
-                    </div>
-                    <div className="card">
-                      <div className="card-t">⚙ Settings</div>
-                      {([
-                        {key:'timerAutoStart' as const, l:'Auto-start next'},
-                        {key:'timerSound' as const, l:'Sound alerts'},
-                        {key:'timerLongBreak' as const, l:'Long break after 4'},
-                      ]).map(s=>(
-                        <div key={s.key} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:13}}>
-                          <span style={{fontSize:13,fontWeight:500}}>{s.l}</span>
-                          <label className="toggle">
-                            <input type="checkbox" checked={userSettings[s.key]} onChange={e=>saveSettings({[s.key]:e.target.checked})}/>
-                            <span className="tslider"/>
-                          </label>
-                        </div>
-                      ))}
                     </div>
                   </div>
                 </div>
@@ -2466,18 +2490,6 @@ export default function DashboardPage() {
               {(() => {
                 const gap = Math.max(0.01, Number(editGoalForm.gap) || 1)
 
-
-                const stopHold = () => {
-                  if (holdTimerRef.current) clearTimeout(holdTimerRef.current)
-                  if (holdIntervalRef.current) clearInterval(holdIntervalRef.current)
-                }
-                const startHold = (action: () => void) => {
-                  action()
-                  holdTimerRef.current = setTimeout(() => {
-                    holdIntervalRef.current = setInterval(action, 80)
-                  }, 420)
-                }
-
                 const triBtn = (color: string, action: () => void, dir: 'up'|'down') => (
                   <button
                     onMouseDown={() => startHold(action)}
@@ -2579,6 +2591,25 @@ export default function DashboardPage() {
           <img src={completionGif} alt="Celebration!" />
           <div className="completion-popup-label">🎉 Well Done!</div>
           <div className="completion-popup-hint">Tap anywhere to dismiss</div>
+        </div>
+      )}
+
+      {alarmActive && (
+        <div className="alarm-popup" onClick={dismissAlarm}>
+          <div className="alarm-popup-icon">🔔</div>
+          <div className="completion-popup-label">Time&apos;s up!</div>
+          <div className="completion-popup-hint">Tap anywhere to dismiss</div>
+        </div>
+      )}
+
+      {(timerRunning || timerRemain !== timerTotal) && page !== 'timer' && (
+        <div className="mini-timer" onClick={() => navTo('timer')} title="Go to timer">
+          <span className={`mini-timer-dot${timerRunning ? ' pulse' : ''}`} />
+          <span className="mini-timer-icon">{timerMode === 'Pomodoro' ? '🍅' : timerMode === 'Deep Work' ? '🧠' : '☕'}</span>
+          <span className="mini-timer-time">{formatTime(timerRemain)}</span>
+          <button className="mini-timer-btn" onClick={(e) => { e.stopPropagation(); toggleTimer() }} title={timerRunning ? 'Pause' : 'Resume'}>
+            {timerRunning ? '⏸' : '▶'}
+          </button>
         </div>
       )}
 
