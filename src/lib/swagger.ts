@@ -5,7 +5,10 @@ export const swaggerSpec = {
     version: '1.0.0',
     description: 'API documentation for Kira Flow — AI-Powered Study Companion. All protected routes require a valid `access_token` cookie set at login.',
   },
-  servers: [{ url: 'http://localhost:3000', description: 'Local development server' }],
+  servers: [
+    { url: 'https://e2526-wads-b4cc-05.csbihub.id', description: 'Production server (CS server)' },
+    { url: 'http://localhost:3000', description: 'Local development server' },
+  ],
   tags: [
     { name: 'Authentication', description: 'Register, login, and logout' },
     { name: 'Tasks', description: 'Create and manage study tasks' },
