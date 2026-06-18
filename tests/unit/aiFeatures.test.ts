@@ -3,16 +3,26 @@
  * Uses Groq SDK (free) with mocked responses
  */
 
+// `create` must be a single shared mock — aiService.ts calls `new Groq()` fresh on
+// every request, so a factory that returns a brand-new `create` fn per instance
+// would never be the one the code under test actually calls.
+const mockCreate = jest.fn()
 jest.mock('groq-sdk', () => ({
   __esModule: true,
   default: jest.fn().mockImplementation(() => ({
-    chat: { completions: { create: jest.fn() } },
+    chat: { completions: { create: mockCreate } },
   })),
 }))
 
 jest.mock('@/lib/db', () => ({
   prisma: {
     aIAnalysis: { create: jest.fn().mockResolvedValue({}) },
+    task: {
+      findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'task-1', status: 'TODO', ...data })),
+    },
+    subtask: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    goal: { create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'goal-1', status: 'ACTIVE', ...data })) },
   },
 }))
 
@@ -119,5 +129,59 @@ describe('AI Feature: Study Q&A', () => {
     expect(result).toHaveProperty('subject')
     expect(result).toHaveProperty('tokensUsed')
     expect(result).toHaveProperty('latencyMs')
+  })
+
+  it('QA-06: Combined question + task request answers the question and confirms the task', async () => {
+    const toolCall = {
+      id: 'call_1',
+      type: 'function' as const,
+      function: {
+        name: 'create_task',
+        arguments: JSON.stringify({ tasks: [{ title: 'Study Relativity', subject: 'Physics' }] }),
+      },
+    }
+    ;(mockGroq.chat.completions.create as jest.Mock)
+      .mockResolvedValueOnce({
+        choices: [{ message: { content: null, tool_calls: [toolCall] } }],
+        usage: { total_tokens: 100 },
+      })
+      .mockResolvedValueOnce({
+        choices: [{ message: { content: "Relativity describes how space and time are linked." } }],
+        usage: { total_tokens: 50 },
+      })
+
+    const result = await answerStudyQuestion('user-1', "Explain relativity and add a task to study it", 'Physics')
+
+    expect(mockGroq.chat.completions.create).toHaveBeenCalledTimes(2)
+    expect(result.answer).toContain('Relativity describes how space and time are linked.')
+    expect(result.answer).toContain('Study Relativity')
+    expect(result.tasksCreated).toHaveLength(1)
+    expect(result.tokensUsed).toBe(150)
+  })
+
+  it('QA-07: Task-only request skips the follow-up explanation when nothing else to address', async () => {
+    const toolCall = {
+      id: 'call_1',
+      type: 'function' as const,
+      function: {
+        name: 'create_task',
+        arguments: JSON.stringify({ tasks: [{ title: 'Math Homework' }] }),
+      },
+    }
+    ;(mockGroq.chat.completions.create as jest.Mock)
+      .mockResolvedValueOnce({
+        choices: [{ message: { content: null, tool_calls: [toolCall] } }],
+        usage: { total_tokens: 80 },
+      })
+      .mockResolvedValueOnce({
+        choices: [{ message: { content: 'NONE' } }],
+        usage: { total_tokens: 10 },
+      })
+
+    const result = await answerStudyQuestion('user-1', 'Add a task for math homework', 'Math')
+
+    expect(result.answer).not.toContain('NONE')
+    expect(result.answer).toContain('Math Homework')
+    expect(result.tasksCreated).toHaveLength(1)
   })
 })

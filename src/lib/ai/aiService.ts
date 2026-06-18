@@ -459,28 +459,59 @@ Today's date is ${today}; convert any date/time format ("tomorrow", "next Monday
     })
 
     const message = response.choices[0]?.message
-    const tokensUsed = response.usage?.total_tokens || 0
-    const latencyMs = Date.now() - start
+    let tokensUsed = response.usage?.total_tokens || 0
 
     const toolCalls = message?.tool_calls || []
     if (toolCalls.length > 0) {
-      const answers: string[] = []
+      const confirmationById = new Map<string, string>()
       let tasksCreated: CreatedTask[] = []
       let missionsCreated: CreatedMission[] = []
 
       for (const toolCall of toolCalls) {
         if (toolCall.function.name === 'create_task') {
           const { answer, tasks } = await createTasksFromArgs(userId, toolCall.function.arguments)
-          answers.push(answer)
+          confirmationById.set(toolCall.id, answer)
           tasksCreated = tasksCreated.concat(tasks)
         } else if (toolCall.function.name === 'create_mission') {
           const { answer, missions } = await createMissionsFromArgs(userId, toolCall.function.arguments)
-          answers.push(answer)
+          confirmationById.set(toolCall.id, answer)
           missionsCreated = missionsCreated.concat(missions)
         }
       }
 
-      const answer = answers.join('\n\n')
+      const confirmations = toolCalls.map(tc => confirmationById.get(tc.id) || 'Done.')
+
+      // On a tool-calling turn Groq returns empty message content, so if the user's
+      // message also asked a question or wanted an explanation alongside the action
+      // request (e.g. "explain X and add a task for it"), that part would otherwise
+      // be silently dropped. Ask the model to address anything else from the
+      // original message before appending the deterministic tool confirmations below.
+      let knowledgeAnswer = (message?.content || '').trim()
+      if (!knowledgeAnswer) {
+        try {
+          const followUp = await getGroq().chat.completions.create({
+            model: MODEL,
+            messages: [
+              ...messages,
+              { role: 'assistant' as const, content: message?.content || null, tool_calls: toolCalls },
+              ...toolCalls.map((tc, i) => ({ role: 'tool' as const, tool_call_id: tc.id, content: confirmations[i] })),
+              { role: 'user' as const, content: 'Besides what you just created, did my last message also ask a question or request an explanation? If so, answer it now following your usual guidelines. If there was nothing else to address, reply with exactly NONE.' },
+            ],
+            max_tokens: 1000,
+            temperature: 0.7,
+          })
+          tokensUsed += followUp.usage?.total_tokens || 0
+          const followUpContent = (followUp.choices[0]?.message?.content || '').trim()
+          if (followUpContent && followUpContent.toUpperCase() !== 'NONE') {
+            knowledgeAnswer = followUpContent
+          }
+        } catch (err) {
+          console.error('[AI] Follow-up answer failed:', err)
+        }
+      }
+
+      const answer = [knowledgeAnswer, ...confirmations].filter(Boolean).join('\n\n')
+      const latencyMs = Date.now() - start
 
       await prisma.aIAnalysis.create({
         data: {
@@ -504,6 +535,7 @@ Today's date is ${today}; convert any date/time format ("tomorrow", "next Monday
       }
     }
 
+    const latencyMs = Date.now() - start
     const answer = message?.content || 'Sorry, I could not generate an answer.'
 
     await prisma.aIAnalysis.create({

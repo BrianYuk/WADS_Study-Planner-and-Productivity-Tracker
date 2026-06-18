@@ -398,7 +398,7 @@ email/password (JWT) and Google sign-in (OAuth) authentication work on the live 
 | ChatGPT (GPT-4) | Boilerplate generation, debugging assistance | Initial API route structure, Prisma schema drafts |
 | GitHub Copilot | In-editor code suggestions | Component scaffolding, test case generation |
 | Groq API (Llama 3.3 70B) | Application AI feature | Task prioritization, study Q&A, schedule optimization |
-| Claude Sonnet 4.6 | UI implementation and polishing | Make UI more interactive and feature rich
+| Claude Sonnet 4.6 | UI implementation and polishing | Make UI more interactive and feature rich |
 
 > "ChatGPT was used to assist with initial API structure and Prisma schema design. GitHub Copilot provided suggestions during development. All generated code was reviewed, modified, tested, and fully understood by each team member. The Groq API (Llama 3.3 70B) is integrated as a core application feature with full testing coverage."
 
